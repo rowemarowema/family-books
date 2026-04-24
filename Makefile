@@ -75,8 +75,12 @@ drill-rollback: ## Take a backup, restore into a scratch DB, verify tie-out (Gro
 	$(MANAGE) drill_rollback
 
 .PHONY: check
-check: ## Run Django's system checks.
-	$(MANAGE) check --deploy --fail-level WARNING
+check: ## Run Django's system checks (does not connect to the database).
+	$(MANAGE) check
+
+.PHONY: check-deploy
+check-deploy: ## Run deploy-mode security checks against prod settings (CI only).
+	DJANGO_SETTINGS_MODULE=family_books.settings.prod $(MANAGE) check --deploy --fail-level WARNING
 
 .PHONY: clean
 clean: ## Remove caches and coverage artifacts.
