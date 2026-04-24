@@ -40,6 +40,10 @@ urlpatterns = [
         disabled_self_service_disable,
         name="two_factor_disable_shadow",
     ),
-    path("", include("two_factor.urls", "two_factor")),
+    # Django 5 dropped the `include(module, namespace)` 2-arg form. Use the
+    # 2-tuple `include((urlconf, app_name))` shape instead. two_factor's own
+    # module sets app_name="two_factor", so the tuple is explicit rather than
+    # overriding anything.
+    path("", include(("two_factor.urls", "two_factor"))),
     path("admin/", admin_site.urls),
 ]

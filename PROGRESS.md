@@ -84,9 +84,15 @@ complete, what is next, and any open questions. See
 
 ```bash
 make install         # picks up formtools (added this group)
+make check           # <<< always run first; catches URL/settings load errors
+                     #     before they show up mid-migrate or mid-test.
 make migrate         # applies core + audit initial migrations
 make test            # runs the 27 integration tests
 ```
+
+**Standing rule from now on:** `make check` comes before `make migrate` and
+`make test` in every per-group verification block. CI in Group G will make
+this durable by running `check` on every push.
 
 ### Stage 1 acceptance-checklist items reachable now
 
