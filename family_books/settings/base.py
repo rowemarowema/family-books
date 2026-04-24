@@ -61,16 +61,15 @@ DJANGO_APPS = [
     "django.contrib.staticfiles",
 ]
 
-# Auth, 2FA, and lockout apps are wired in Group C. Listed here early so the
-# base INSTALLED_APPS ordering is stable as they land.
 THIRD_PARTY_APPS: list[str] = [
-    # "allauth",
-    # "allauth.account",
-    # "django_otp",
-    # "django_otp.plugins.otp_totp",
-    # "django_otp.plugins.otp_static",
-    # "two_factor",
-    # "axes",
+    "django_otp",
+    "django_otp.plugins.otp_totp",
+    "django_otp.plugins.otp_static",
+    # formtools is a transitive requirement of django-two-factor-auth (its
+    # SessionWizardView). Must be installed for the login/setup flow.
+    "formtools",
+    "two_factor",
+    "axes",
 ]
 
 LOCAL_APPS = [
@@ -84,6 +83,13 @@ LOCAL_APPS = [
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 # ---------------------------------------------------------------------------
+# Custom admin site (books.core.admin_site.FamilyBooksAdminSite)
+# ---------------------------------------------------------------------------
+# Auto-discovery is handled by the default admin config; we register on our
+# custom site in each app's admin.py.
+
+
+# ---------------------------------------------------------------------------
 # Middleware
 # ---------------------------------------------------------------------------
 MIDDLEWARE = [
@@ -93,9 +99,17 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    # OTPMiddleware annotates request.user with is_verified(); must come
+    # after AuthenticationMiddleware.
+    "django_otp.middleware.OTPMiddleware",
+    # AxesMiddleware catches lockouts on login; must come after auth.
+    "axes.middleware.AxesMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    # Auth / 2FA / lockout middleware appended in Group C.
+    # Our hardening middleware comes last so it sees the fully authenticated
+    # + OTP-annotated request.
+    "books.core.middleware.SessionAbsoluteTimeoutMiddleware",
+    "books.core.middleware.TwoFactorEnforcementMiddleware",
 ]
 
 ROOT_URLCONF = "family_books.urls"
@@ -131,6 +145,22 @@ DATABASES = {
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ---------------------------------------------------------------------------
+# Auth
+# ---------------------------------------------------------------------------
+AUTH_USER_MODEL = "core.User"
+
+# django-axes must come first so brute-force attempts are caught before the
+# standard auth backend validates credentials.
+AUTHENTICATION_BACKENDS = [
+    "axes.backends.AxesStandaloneBackend",
+    "django.contrib.auth.backends.ModelBackend",
+]
+
+LOGIN_URL = "two_factor:login"
+LOGIN_REDIRECT_URL = "/"
+LOGOUT_REDIRECT_URL = LOGIN_URL
+
+# ---------------------------------------------------------------------------
 # Password hashing and validators
 # ---------------------------------------------------------------------------
 PASSWORD_HASHERS = [
@@ -163,6 +193,27 @@ SESSION_COOKIE_SAMESITE = "Lax"
 # SESSION_COOKIE_SECURE set in prod.py
 
 SESSION_ABSOLUTE_TIMEOUT_SECONDS = 12 * 60 * 60  # 12 hours; enforced by middleware
+
+# ---------------------------------------------------------------------------
+# django-axes (brute-force lockout)
+# ---------------------------------------------------------------------------
+from datetime import timedelta as _timedelta  # noqa: E402
+
+AXES_FAILURE_LIMIT = 5
+AXES_COOLOFF_TIME = _timedelta(minutes=15)
+AXES_LOCKOUT_PARAMETERS = ["username", "ip_address"]
+AXES_RESET_ON_SUCCESS = True
+AXES_ONLY_USER_FAILURES = False
+
+# ---------------------------------------------------------------------------
+# django-two-factor-auth
+# ---------------------------------------------------------------------------
+# Never offer a "remember this device for N days" option; every login re-prompts
+# for the OTP. Aligned with decision #10: 2FA is load-bearing once enabled.
+TWO_FACTOR_REMEMBER_COOKIE_AGE = 0
+TWO_FACTOR_PATCH_ADMIN = False  # we use our own FamilyBooksAdminSite gate
+TWO_FACTOR_CALL_GATEWAY = None
+TWO_FACTOR_SMS_GATEWAY = None
 
 # ---------------------------------------------------------------------------
 # Internationalization
