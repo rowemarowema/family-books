@@ -26,6 +26,13 @@ from django.core.management.base import BaseCommand, CommandError
 class Command(BaseCommand):
     help = "Create the sole owner user. Idempotent with the same email."
 
+    # Opt into an injected stdin stream so tests can pass stdin=StringIO(...)
+    # to call_command. Without this, call_command raises TypeError: Unknown
+    # option(s) because "stdin" isn't in BaseCommand.base_stealth_options
+    # (which is only ("stderr", "stdout") per
+    # site-packages/django/core/management/base.py line 273).
+    stealth_options = ("stdin",)
+
     def add_arguments(self, parser: Any) -> None:
         parser.add_argument("--email", required=True, help="Owner email (also used as username).")
         parser.add_argument(
@@ -55,8 +62,9 @@ class Command(BaseCommand):
                 "Refusing to bootstrap on a non-empty system."
             )
 
+        stdin = options.get("stdin") or sys.stdin
         password = (
-            sys.stdin.read().rstrip("\n") if options["password_stdin"] else _prompt_password()
+            stdin.read().rstrip("\n") if options["password_stdin"] else _prompt_password()
         )
 
         try:

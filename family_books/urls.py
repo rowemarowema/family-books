@@ -16,6 +16,14 @@ from __future__ import annotations
 from django.http import HttpRequest, HttpResponse, HttpResponseForbidden
 from django.urls import include, path
 
+# two_factor.urls.urlpatterns is pre-wrapped as a 2-tuple
+# (pattern_list, 'two_factor'). Import it explicitly and pass to include() so
+# Django's include() destructures (urlconf_module=pattern_list, app_name=
+# 'two_factor'). Verified against
+# site-packages/two_factor/urls.py line 71 and
+# site-packages/django/urls/conf.py lines 17-59.
+from two_factor.urls import urlpatterns as two_factor_urls
+
 from books.core.admin_site import admin_site
 
 
@@ -40,10 +48,6 @@ urlpatterns = [
         disabled_self_service_disable,
         name="two_factor_disable_shadow",
     ),
-    # Django 5 dropped the `include(module, namespace)` 2-arg form. Use the
-    # 2-tuple `include((urlconf, app_name))` shape instead. two_factor's own
-    # module sets app_name="two_factor", so the tuple is explicit rather than
-    # overriding anything.
-    path("", include(("two_factor.urls", "two_factor"))),
+    path("", include(two_factor_urls)),
     path("admin/", admin_site.urls),
 ]

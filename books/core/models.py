@@ -70,8 +70,11 @@ class SystemFlag(models.Model):
     class Meta:
         db_table = "core_system_flag"
         constraints = [
+            # `condition=` is the Django 5.1+ name; `check=` is deprecated
+            # (RemovedInDjango60Warning per
+            # site-packages/django/db/models/constraints.py line 169).
             CheckConstraint(
-                check=Q(id=1),
+                condition=Q(id=1),
                 name="core_system_flag_singleton",
             ),
         ]

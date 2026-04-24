@@ -87,12 +87,55 @@ make install         # picks up formtools (added this group)
 make check           # <<< always run first; catches URL/settings load errors
                      #     before they show up mid-migrate or mid-test.
 make migrate         # applies core + audit initial migrations
-make test            # runs the 27 integration tests
+make test            # runs the 32 integration tests (expect all green)
 ```
 
 **Standing rule from now on:** `make check` comes before `make migrate` and
 `make test` in every per-group verification block. CI in Group G will make
 this durable by running `check` on every push.
+
+### Retrospective: Group C bug clusters and the pre-commit checklist
+
+Two follow-up bug clusters shipped to Mark during Group C review:
+1. URL include used `include("two_factor.urls", "two_factor")` (Django 5
+   dropped that 2-arg form). First "fix" `include(("two_factor.urls",
+   "two_factor"))` was also wrong because `two_factor.urls.urlpatterns` is
+   itself a 2-tuple `(pattern_list, 'two_factor')` — the correct form is
+   `from two_factor.urls import urlpatterns as tf; include(tf)`.
+2. Tests passed `stdin=StringIO(...)` to `call_command`, but `stdin` isn't
+   in `BaseCommand.base_stealth_options`. Fix: declare `stealth_options =
+   ("stdin",)` on the command and read `options.get("stdin") or sys.stdin`
+   in handle().
+
+Also caught and fixed during the retro:
+- `AXES_ONLY_USER_FAILURES = False` (deprecated since axes 6.x;
+  `AXES_LOCKOUT_PARAMETERS` already covers it).
+- `CheckConstraint(check=Q(...))` (Django 5.1 renamed to `condition=`;
+  removed in Django 6.0).
+
+Common thread: I can't run Python locally, so third-party library
+signatures were reconstructed from memory instead of verified against the
+installed sources in
+`C:\Users\markt\AppData\Local\Programs\Python\Python312\Lib\site-packages\`.
+
+**Pre-commit checklist (binding from Group D onward):**
+
+Before declaring any group done, for every file I wrote in that group,
+I will:
+
+1. List every call to a third-party library API (Django internals, axes,
+   two_factor, django_otp, allauth, factory_boy, pytest, etc.) and every
+   `call_command` / custom-utility invocation in test code.
+2. For each one, open the installed source under site-packages and verify
+   the signature matches what I wrote. Annotate the call site with a
+   one-line comment citing the source file and line.
+3. If I can't find the source or the signature is ambiguous, flag the
+   call `# UNVERIFIED` and surface it in the group summary so Mark can
+   pressure-test it before running `make test`.
+
+CI in Group G will make this durable (a `check + migrate + test` pass on
+every push can't rely on training-data memory). Until then, this
+checklist is the bridge.
 
 ### Stage 1 acceptance-checklist items reachable now
 

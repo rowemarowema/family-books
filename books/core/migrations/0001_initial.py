@@ -165,7 +165,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="systemflag",
             constraint=models.CheckConstraint(
-                check=models.Q(id=1),
+                condition=models.Q(id=1),
                 name="core_system_flag_singleton",
             ),
         ),

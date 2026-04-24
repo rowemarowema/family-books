@@ -201,9 +201,10 @@ from datetime import timedelta as _timedelta  # noqa: E402
 
 AXES_FAILURE_LIMIT = 5
 AXES_COOLOFF_TIME = _timedelta(minutes=15)
+# Verified against site-packages/axes/conf.py line 16 — this is the axes 6+
+# replacement for the deprecated AXES_ONLY_USER_FAILURES / AXES_LOCK_OUT_* set.
 AXES_LOCKOUT_PARAMETERS = ["username", "ip_address"]
 AXES_RESET_ON_SUCCESS = True
-AXES_ONLY_USER_FAILURES = False
 
 # ---------------------------------------------------------------------------
 # django-two-factor-auth
