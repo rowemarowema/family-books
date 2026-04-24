@@ -20,6 +20,16 @@ dist/
 build/
 .next/
 out/
+*.egg-info/
+staticfiles/
+
+# Test / lint / type-check artifacts
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
 
 # OS
 .DS_Store
