@@ -21,7 +21,8 @@ complete, what is next, and any open questions. See
   - Commits: `6099e55`, `e10dcfa` (Makefile `check` target fix).
   - **Verified locally:** Mark ran `make install && make check`
     successfully on Python 3.12.10 in Git Bash.
-- **Group C** — authentication + 2FA + hardened enforcement + admin site.
+- **Group C** — authentication + 2FA + hardened enforcement + admin site +
+  recovery playbook.
   - Custom `books.core.User` (AbstractUser pass-through), singleton
     `books.core.SystemFlag`, `books.audit.AuditLog`.
   - `SessionAbsoluteTimeoutMiddleware` (12h cap).
@@ -33,9 +34,14 @@ complete, what is next, and any open questions. See
     User #2.
   - `django-axes` wired (5 fails → 15 min lockout); lockout and
     `user_login_failed` signals write to `AuditLog`.
-  - 22 integration tests under `tests/integration/`.
+  - **Recovery model (decision #23):** `reset_owner_2fa` command +
+    `docs/RECOVERY.md` covering all lockout scenarios. No allauth
+    password-reset UI — mgmt commands via Render Shell match the
+    decision-#22 pattern.
+  - 27 integration tests under `tests/integration/` (5 new for
+    `reset_owner_2fa`).
   - Initial migrations hand-written: `books.core.0001`, `books.audit.0001`.
-  - Commit: pending (this session).
+  - Commits: `989b47e`, plus a follow-up for recovery.
 
 ### Design decisions made during Group C
 
@@ -56,6 +62,13 @@ complete, what is next, and any open questions. See
    can't run `makemigrations`. The two initial migrations mirror what
    Django 5.1 generates. `make migrate` on a fresh DB is the
    verification step.
+5. **Decision #23 — credential recovery via management commands, not UI.**
+   Mark flagged the lockout risk of dropping allauth. Picked mgmt-commands
+   + a printed runbook over wiring allauth's password-reset. Same
+   deliberate-ops-action shape as decision #22; avoids email-in-the-loop.
+   New: `reset_owner_2fa` command + `docs/RECOVERY.md` (covers forgotten
+   password, lost TOTP, lost both, axes lockout, stuck 2FA enforcement,
+   corrupted owner row, lost age key, Render compromise).
 
 ### Up next
 
@@ -72,7 +85,7 @@ complete, what is next, and any open questions. See
 ```bash
 make install         # picks up formtools (added this group)
 make migrate         # applies core + audit initial migrations
-make test            # runs the 22 integration tests
+make test            # runs the 27 integration tests
 ```
 
 ### Stage 1 acceptance-checklist items reachable now
