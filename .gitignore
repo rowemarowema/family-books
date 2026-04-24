@@ -35,3 +35,6 @@ Thumbs.db
 /exports/
 /uploads/
 scratch/
+
+# Claude Code per-user config (shared is .claude/settings.json; local is per-user)
+.claude/settings.local.json
