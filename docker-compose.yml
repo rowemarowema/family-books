@@ -8,7 +8,11 @@ services:
       POSTGRES_PASSWORD: family_books
       POSTGRES_DB: family_books
     ports:
-      - "5432:5432"
+      # Host side 5433 (not 5432) so a Family Books Postgres can coexist
+      # with Mark's parallel rowe-contest-postgres-1 container. Container
+      # side stays 5432 — DATABASE_URL from inside the container network
+      # would still use 5432, but we connect from the host.
+      - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

@@ -139,7 +139,7 @@ ASGI_APPLICATION = "family_books.asgi.application"
 DATABASES = {
     "default": env.db(
         "DATABASE_URL",
-        default="postgres://family_books:family_books@localhost:5432/family_books",
+        default="postgres://family_books:family_books@localhost:5433/family_books",
     )
 }
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
