@@ -70,24 +70,85 @@ complete, what is next, and any open questions. See
    password, lost TOTP, lost both, axes lockout, stuck 2FA enforcement,
    corrupted owner row, lost age key, Render compromise).
 
-### Up next
+- **Group D** — accounting engine contract surface (Account,
+  JournalEntry, JournalLine, post_entry, reverse_entry).
+  - `books/accounting/models.py` — `Account` with 4-level hierarchy +
+    normal-balance validators; `JournalEntry` with status state machine +
+    sticky immutability on save/delete; `JournalLine` with per-row CHECK
+    constraints (debit ≥ 0, credit ≥ 0, debit XOR credit).
+  - `books/accounting/posting.py` — `post_entry(entry, *, user, reason)`
+    and `reverse_entry(original, *, user, reason, as_of)`. Both atomic.
+    Reversal linkage one-way (reversal.reversing_entry_id → original),
+    cycle-protected, DB-level unique constraint
+    `one_reversal_per_original`.
+  - `books/accounting/migrations/0002_immutability_triggers.py` — Postgres
+    BEFORE UPDATE/DELETE on journal_entry and BEFORE INSERT/UPDATE/DELETE
+    on journal_line, each raising `check_violation` when the parent entry
+    is posted. Python save() overrides + DB trigger = defense in depth.
+  - `books/accounting/factories.py` — factory_boy factories +
+    `make_balanced_entry` helper.
+  - Tests (45 new, 77 total): account hierarchy, normal-balance matrix
+    (10 cases), DB CHECK drift detection via `pg_catalog.pg_constraint`,
+    hypothesis property test for CHECK-constraint coverage, posting
+    service (7), reversing service (7 incl. raw-SQL race), immutability
+    (8 incl. DB-trigger coverage), account deletion protection (4),
+    trial-balance tie-out (1, 75-entry property test).
 
-- **Group D** — core data model (Account, JournalEntry, JournalLine) and
-  posting service. AuditLog already landed in Group C, so D shrinks to
-  7 tasks.
+### Design decisions made during Group D
+
+1. **`reversing_entry_id` links from reversal to original (one-way).**
+   Original is never mutated when a reversal is posted, preserving
+   posted-entry immutability. DB has a partial unique index that
+   additionally prevents two reversals pointing at the same original.
+2. **Four layers of debit/credit defense.** DB CHECK for per-row XOR +
+   non-negative (catches raw-SQL bypasses); `JournalLine.clean()` for
+   form-surface friendly errors; `post_entry` for cross-line sum and
+   account-active checks; Postgres trigger blocks any mutation or
+   additional insert on lines of a posted entry.
+3. **`PostedEntryImmutable` repurposed for "entry not in a mutable
+   state."** Raised when posting a non-draft OR reversing a non-posted
+   entry. Message text disambiguates; `AccountingError` base catches
+   both.
+4. **Account number format is convention-only** (refinement #4). 16-char
+   CharField with no format regex. Sub-numbering like `10100` / `10101`
+   is welcome.
+5. **`ON DELETE PROTECT` on `JournalLine.account`** (refinement #3). Hard-
+   delete of an account with posted lines raises `ProtectedError`; to
+   retire an account, deactivate via `is_active=False`. The posting
+   service also rejects inactive accounts on new postings.
+6. **Trigger permits the single `draft → posted` transition** because
+   `OLD.status` is still `'draft'` at the moment the UPDATE fires. Every
+   subsequent write has `OLD.status = 'posted'` and raises. Tested
+   negatively (draft→posted succeeds) to prevent future regressions
+   that over-block.
+
+### Deferred
+
+- **2FA grace-window warning (banner + T+23h email)** explicitly deferred
+  to **Group I** (living docs + ops polish). Rationale walked through in
+  the Group C review thread; see also `docs/RECOVERY.md` section 5. Until
+  Group I lands, the sole warning at auto-re-enable is the
+  `two_factor_enforcement_auto_re_enabled` AuditLog row, plus the CLI
+  output the operator saw at T=0 when they ran
+  `disable_2fa_enforcement`.
+
+### Time / date policy (load-bearing for Group D onward)
+
+Timestamps stored UTC, displayed in America/Chicago. Dates are
+tz-naive. All `as_of` parameters are naive `date`s; all `posted_at`
+and audit `timestamp` fields are tz-aware UTC. See
+`docs/TIMEZONE.md` (landing in Group I) for rendering examples.
 
 ### Open questions
 
-- None blocking. Mark's Group-C review is next per the agreed cadence.
+- None blocking.
 
-### Verification to run before approving Group C
+### Verification to run before approving Group D
 
 ```bash
-make install         # picks up formtools (added this group)
-make check           # <<< always run first; catches URL/settings load errors
-                     #     before they show up mid-migrate or mid-test.
-make migrate         # applies core + audit initial migrations
-make test            # runs the 32 integration tests (expect all green)
+make check           # <<< always run first (standing rule)
+make migrate         # applies accounting.0001_initial + 0002_immutability_triggers
+make test            # expect 77/77 green; books.accounting.* coverage ≥ 80%
 ```
 
 **Standing rule from now on:** `make check` comes before `make migrate` and
