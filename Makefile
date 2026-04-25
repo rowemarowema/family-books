@@ -61,6 +61,14 @@ test-fast: ## Iteration loop: --reuse-db + -x + --ff. Drop to `make test` after 
 dataset: ## Load the seed test dataset (populated in later stages).
 	$(MANAGE) load_test_dataset
 
+.PHONY: image-build
+image-build: ## Build the production Docker image locally (Group H).
+	docker build -t family-books:dev .
+
+.PHONY: image-shell
+image-shell: ## Interactive shell inside the built image (debug Docker setup).
+	docker run --rm -it --entrypoint=/bin/bash family-books:dev
+
 .PHONY: backup
 backup: ## Run a one-off encrypted backup (wired in Group H).
 	$(MANAGE) backup_db
