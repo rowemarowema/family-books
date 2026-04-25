@@ -147,13 +147,19 @@ def set_opening_balance(
     _check_period_open(as_of)
 
     reference_number = _opening_reference(account, as_of)
-    # An opening JE is "active" for this (account, as_of) if it exists
-    # AND has no reversal pointing to it. Reversing the original
-    # un-blocks re-posting at the same as_of — the contract is
-    # "idempotent only via the explicit reverse + re-post path."
+    # An opening JE is "active" for this (account, as_of) iff:
+    #   1. its reference_number matches, AND
+    #   2. no reversal points to it (reversed_by__isnull=True), AND
+    #   3. it is not itself a reversal (reversing_entry__isnull=True).
+    #
+    # Group D's reverse_entry() copies the original's reference_number
+    # onto the reversal (posting.py:169). Without (3), a reversal
+    # would match (1) and (2) — it has no reversal of its own — and
+    # be wrongly flagged as an active opening JE, blocking re-posting.
     active_existing = JournalEntry.objects.filter(
         reference_number=reference_number,
         reversed_by__isnull=True,
+        reversing_entry__isnull=True,
     ).exists()
     if active_existing:
         _audit_refusal(

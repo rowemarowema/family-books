@@ -423,6 +423,87 @@ def test_property_trial_balance_ties_out_under_random_entries(seed, owner):
 
 
 @pytest.mark.django_db
+def test_reversed_opening_balances_net_to_zero_in_trial_balance(
+    owner, opening_balance_equity, revenue
+):
+    """Property: post N opening balances, reverse half, assert the
+    trial balance reflects only the un-reversed half's amounts.
+
+    This catches the case Mark flagged: if compute_trial_balance() ever
+    starts treating reversed JEs as still-active, an account with a
+    reversed opening balance would show its original amount instead of
+    netting to zero.
+
+    Mechanics: a reversal's lines flip debit↔credit relative to the
+    original. Original Cash = +100 dr; reversal Cash = +100 cr. Same
+    account's row in the TB has debits_total=100 AND credits_total=100,
+    so own_balance (debits - credits for debit-normal) = 0.
+    """
+    from books.accounting.opening_balances import (
+        reverse_opening_balance,
+        set_opening_balance,
+    )
+
+    accounts = [
+        AccountFactory(
+            account_number=f"1-R{i}",
+            name=f"AssetR{i}",
+            type=AccountType.ASSET,
+            normal_balance=NormalBalance.DEBIT,
+        )
+        for i in range(6)
+    ]
+    amounts = [Decimal("100.00"), Decimal("200.00"), Decimal("300.00"),
+               Decimal("400.00"), Decimal("500.00"), Decimal("600.00")]
+
+    results = []
+    for acct, amt in zip(accounts, amounts):
+        results.append(
+            set_opening_balance(
+                acct, amount=amt, as_of=date(2001, 1, 1), user=owner,
+            )
+        )
+
+    # Reverse the first 3.
+    for r in results[:3]:
+        reverse_opening_balance(r, user=owner, reason="test reversal")
+
+    tb = compute_trial_balance(as_of=date(2099, 1, 1))
+
+    # Reversed accounts: own_balance == 0 (the original and reversal
+    # cancel out via summation).
+    for acct in accounts[:3]:
+        rows = [r for r in _walk_rows(tb.rows) if r.account.pk == acct.pk]
+        # Activity-aware filter: balance==0 but lines exist (debits+credits
+        # both = original_amount), so account IS visible.
+        assert len(rows) == 1
+        assert rows[0].own_balance == Decimal("0.00"), (
+            f"Reversed account {acct.account_number} should net to zero, "
+            f"got own_balance={rows[0].own_balance}"
+        )
+
+    # Un-reversed accounts: own_balance == original amount.
+    for acct, amt in zip(accounts[3:], amounts[3:]):
+        rows = [r for r in _walk_rows(tb.rows) if r.account.pk == acct.pk]
+        assert len(rows) == 1
+        assert rows[0].own_balance == amt, (
+            f"Un-reversed account {acct.account_number} expected "
+            f"own_balance={amt}, got {rows[0].own_balance}"
+        )
+
+    # Total tie-out: still balanced (every reversal is itself a balanced
+    # entry, so adding reversals can't unbalance the books).
+    assert tb.is_balanced
+
+    # OBE: net of remaining 3 un-reversed credits (400+500+600 = 1500).
+    obe_row = next(
+        r for r in _walk_rows(tb.rows)
+        if r.account.pk == opening_balance_equity.pk
+    )
+    assert obe_row.own_balance == Decimal("1500.00")
+
+
+@pytest.mark.django_db
 def test_rollup_recurrence_holds_for_built_tree(owner, opening_balance_equity, revenue):
     """For every parent in the tree, rollup_balance equals own_balance
     plus the sum of children's rollup_balance values."""
