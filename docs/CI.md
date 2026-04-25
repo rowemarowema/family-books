@@ -48,6 +48,45 @@ from production-readiness (the actual goal). The honest gate posture
 is "we run it, we don't yet enforce it"; Group I is where the
 backlog gets cleared and the gate flips to mandatory.
 
+### `make check-deploy` posture
+
+Step 2.5 (`make check-deploy`) runs Django's `check --deploy
+--fail-level WARNING` against the **production** settings module.
+On a real Render deploy, `SECRET_KEY` and `ALLOWED_HOSTS` come from
+Render dashboard secrets. CI doesn't have those secrets and shouldn't
+need them — the goal of the CI step is to verify **config structure**
+(prod settings load without error, all deploy-time checks pass when
+given shaped-correctly inputs), NOT to verify **production-secret
+strength** (which is Render's concern at deploy time).
+
+The CI workflow injects placeholder values at the step level:
+
+```yaml
+env:
+  SECRET_KEY: "ci-placeholder-key-long-enough-to-pass-django-w009-check-and-have-50plus-chars"
+  ALLOWED_HOSTS: "ci.example.com"
+```
+
+These satisfy:
+- **W009** — SECRET_KEY length ≥ 50 chars and entropy thresholds.
+- **W020** — ALLOWED_HOSTS not empty.
+
+The values are deliberately obvious-placeholder so a future reader
+can't mistake them for real secrets. Production values are scoped to
+Render's env-var store and never appear in the repo.
+
+**The W001 (WeasyPrint) check still fires as a build-failing error
+in this step** if GTK isn't apt-installed on the runner. That's the
+load-bearing assertion of the step; the placeholder env vars just
+let W009/W020 pass so W001 isn't masked by them.
+
+**Standing rule.** When adding a CI stage that targets prod settings
+(`check --deploy`, `migrate` against prod settings, etc.), wire the
+inline placeholder env vars **in the same commit**. Otherwise the
+gate becomes "does CI know how to fail" rather than "does the config
+work." See `memory/feedback_ci_stage_posture.md` for the broader
+posture pattern.
+
 `make lint`, in contrast, came in clean after auto-fixing 53
 mechanical issues + targeted suppressions in `pyproject.toml` for
 the 5 Django-convention false-positives (N806, N818, RUF012, DJ001,

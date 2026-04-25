@@ -86,6 +86,18 @@ jobs:
         # error if GTK isn't installed in the runner. Production
         # (render.yaml) runs the same target. Local `make check` keeps
         # WeasyPrint as a Warning so Windows dev isn't blocked.
+        #
+        # The step-level env vars below are placeholder values — NOT
+        # secrets. They satisfy Django's W009 (SECRET_KEY length /
+        # entropy) and W020 (ALLOWED_HOSTS non-empty) heuristics so
+        # `check --deploy` can verify config STRUCTURE on CI without
+        # conflating that with verifying production-secret strength
+        # (which is Render's concern, not CI's). Real values live in
+        # Render env vars at deploy time. See docs/CI.md
+        # § "make check-deploy posture".
+        env:
+          SECRET_KEY: "ci-placeholder-key-long-enough-to-pass-django-w009-check-and-have-50plus-chars"
+          ALLOWED_HOSTS: "ci.example.com"
         run: make check-deploy
 
       - name: Step 3 — makemigrations --dry-run (must report no changes)
