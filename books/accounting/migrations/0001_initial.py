@@ -248,9 +248,16 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="journalline",
             constraint=models.CheckConstraint(
+                # Children are alpha-sorted to match what `makemigrations`
+                # emits from the model's kwarg form. Q.__init__ runs
+                # `children=[*args, *sorted(kwargs.items())]`, so the
+                # model's `Q(debit_amount__gt=0, credit_amount=0)` produces
+                # children `[("credit_amount", 0), ("debit_amount__gt", 0)]`.
+                # The migration's positional tuples must match that order
+                # or Django's autodetector flags drift on every dry-run.
                 condition=(
-                    models.Q(("debit_amount__gt", 0), ("credit_amount", 0))
-                    | models.Q(("debit_amount", 0), ("credit_amount__gt", 0))
+                    models.Q(("credit_amount", 0), ("debit_amount__gt", 0))
+                    | models.Q(("credit_amount__gt", 0), ("debit_amount", 0))
                 ),
                 name="journal_line_debit_xor_credit",
             ),

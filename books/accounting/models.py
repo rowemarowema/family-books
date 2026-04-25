@@ -134,9 +134,19 @@ class Account(models.Model):
     class Meta:
         db_table = "account"
         ordering = ["display_order", "name"]
+        # Index names are pinned to match what the migrations created.
+        # Without an explicit name, Django auto-generates a hash-based
+        # name from the field list, and `makemigrations --dry-run` would
+        # report a no-op rename on every run.
         indexes = [
-            models.Index(fields=["type", "is_active"]),
-            models.Index(fields=["display_order", "name"]),
+            models.Index(
+                fields=["type", "is_active"],
+                name="account_type_active_idx",
+            ),
+            models.Index(
+                fields=["display_order", "name"],
+                name="account_disporder_name_idx",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -280,8 +290,14 @@ class JournalEntry(models.Model):
         db_table = "journal_entry"
         ordering = ["-entry_date", "-id"]
         indexes = [
-            models.Index(fields=["status", "entry_date"]),
-            models.Index(fields=["posting_date"]),
+            models.Index(
+                fields=["status", "entry_date"],
+                name="je_status_entrydate_idx",
+            ),
+            models.Index(
+                fields=["posting_date"],
+                name="je_posting_date_idx",
+            ),
         ]
         constraints = [
             # One reversal per original — partial unique index on the FK.
@@ -356,7 +372,10 @@ class JournalLine(models.Model):
         db_table = "journal_line"
         ordering = ["id"]
         indexes = [
-            models.Index(fields=["account", "journal_entry"]),
+            models.Index(
+                fields=["account", "journal_entry"],
+                name="jl_account_entry_idx",
+            ),
         ]
         constraints = [
             CheckConstraint(

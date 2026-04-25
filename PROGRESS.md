@@ -184,6 +184,24 @@ complete, what is next, and any open questions. See
    Default user accounts use 0; system accounts use -100/-200/-300.
    Initial proposal (1/2/3) would have placed system accounts after
    user accounts; switched to negatives during the breakdown review.
+7. **Hand-written migrations need `models.Index(name=...)` and
+   alpha-sorted Q children.** The Group E review ran
+   `makemigrations --dry-run` and found 7 indexes and 1 CheckConstraint
+   drifting between the model and the (hand-written) migrations:
+   - Indexes: `Meta.indexes` declarations didn't pin `name=`, so Django
+     auto-hashed names and disagreed with the migration-defined ones.
+     Fix: pin `name=` on every `models.Index` declaration to match the
+     migration identifier exactly.
+   - CheckConstraint: `Q.__init__` runs
+     `children=[*args, *sorted(kwargs.items())]`. The model's
+     `Q(debit_amount__gt=0, credit_amount=0)` produces alpha-sorted
+     children `[("credit_amount", 0), ("debit_amount__gt", 0)]`; the
+     migration's positional tuples were in source order, which Q.__eq__
+     considers different. Fix: rewrite migration's positional tuples
+     in alpha order to match the model's deconstructed form.
+   The standing pre-commit rule now includes
+   `python manage.py makemigrations --dry-run` so this whole class of
+   drift surfaces before commit.
 
 ### reset_coa behavior table
 
@@ -225,9 +243,10 @@ and audit `timestamp` fields are tz-aware UTC. See
 ### Verification to run before approving Group E
 
 ```bash
-make check           # <<< always run first (standing rule)
-make migrate         # accounting.0003 + audit.0002 apply cleanly on top of D's state
-make test            # expect ~135 green; books.accounting.* coverage ≥ 80%
+make check                                   # standing rule, step 1
+make migrate                                 # accounting.0003 + audit.0002
+python manage.py makemigrations --dry-run    # must say "No changes detected"
+make test                                    # ~156 green; coverage ≥ 80%
 
 # Optional smoke of the new commands:
 python manage.py seed_default_coa --dry-run    # validates 643 rows, creates none
@@ -245,9 +264,23 @@ make migrate         # applies accounting.0001_initial + 0002_immutability_trigg
 make test            # expect 77/77 green; books.accounting.* coverage ≥ 80%
 ```
 
-**Standing rule from now on:** `make check` comes before `make migrate` and
-`make test` in every per-group verification block. CI in Group G will make
-this durable by running `check` on every push.
+**Standing rule from now on:** every per-group verification block runs the
+following four steps in order, each must be clean:
+
+```bash
+make check
+make migrate
+python manage.py makemigrations --dry-run    # must report "No changes detected"
+make test
+```
+
+`makemigrations --dry-run` was added to the standing rule after the Group
+E review (2026-04-24): a green test suite can mask model-vs-migration
+drift, because tests run against the migrated DB schema rather than the
+schema Django would derive from the current model state. The dry-run
+trips whenever the two diverge — wrong index name, mismatched Q-children
+ordering inside a CheckConstraint, missing `name=` on `models.Index`,
+etc. CI in Group G will run all four steps on every push.
 
 ### Retrospective: Group C bug clusters and the pre-commit checklist
 

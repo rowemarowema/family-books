@@ -82,9 +82,17 @@ class AuditLog(models.Model):
     class Meta:
         db_table = "audit_log"
         ordering = ["-timestamp"]
+        # Names pinned to migration-defined identifiers; see Account
+        # for the full rationale.
         indexes = [
-            models.Index(fields=["entity_type", "entity_id"]),
-            models.Index(fields=["action", "-timestamp"]),
+            models.Index(
+                fields=["entity_type", "entity_id"],
+                name="audit_log_entity_t_idx",
+            ),
+            models.Index(
+                fields=["action", "-timestamp"],
+                name="audit_log_action_ts_idx",
+            ),
         ]
 
     def __str__(self) -> str:
