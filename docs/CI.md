@@ -12,7 +12,7 @@ weakens them.
 local commit  →  push (triggers CI)  →  PR opened (triggers CI again)
               →  branch protection waits for CI green
               →  merge to main (only allowed when CI green + up-to-date)
-              →  Render auto-deploys main
+              →  SSH to droplet → ./scripts/deploy.sh → manual deploy
 ```
 
 Each arrow is an enforcement boundary. The "branch protection waits"
@@ -147,38 +147,56 @@ workflow, this rule must be updated to match (or the gate becomes a
 no-op). The CI sanity test (`tests/integration/test_ci_config.py`) pins
 the job name implicitly via the workflow's structure assertions.
 
-## Render auto-deploy (`render.yaml`)
+## Production deploy — DigitalOcean droplet (Docker)
 
-Render watches the `main` branch and auto-deploys on any new commit.
-Because branch protection requires CI green before merge, anything
-Render sees has already passed the six-step pipeline.
+Production runs on a DigitalOcean droplet with the Docker pattern:
+postgres + Django (gunicorn) + nginx, all via `docker-compose.prod.yml`.
+Deploys are **manual** — operator SSHes to the droplet and runs
+`./scripts/deploy.sh`. Branch protection still gates merge to main;
+the operator picks the deploy moment.
 
-Build steps (per `render.yaml`):
+The full first-time setup (DNS, Docker install, certbot, env vars,
+container start) lives in `docs/DEPLOY.md`. This section is the CI/CD
+chain reference; DEPLOY.md is the operator runbook.
+
+**Why manual, not auto-deploy.** v1 is a single-user app; "deploy when
+ready" beats "deploy on every merge." Operational discipline of running
+`scripts/deploy.sh` by hand has real value (operator decides timing,
+sees output live, knows what's running). GitHub Actions auto-deploy
+is later polish if cadence demands it.
+
+The deploy script (per `scripts/deploy.sh`) does:
 
 ```
-apt-get update && \
-apt-get install -y libpango-1.0-0 libpangoft2-1.0-0 libgdk-pixbuf2.0-0 && \
-pip install --upgrade pip && \
-pip install . && \
-python manage.py collectstatic --noinput && \
-python manage.py migrate --noinput
+git pull --ff-only
+docker compose -f docker-compose.prod.yml --env-file .env.production build web
+docker compose ... up -d postgres   # wait for healthy
+docker compose ... run --rm --no-deps web python manage.py migrate
+docker compose ... up -d --no-deps --build web
+docker compose ... exec -T nginx nginx -s reload
 ```
 
-The apt-install line is the only Family-Books-specific build step
-(WeasyPrint needs Pango / GDK-PixBuf for PDF rendering — see ADR-006
-and `docs/SETUP.md`). Group H adds a startup check that exercises
-`import weasyprint` at boot and fails fast if the apt-install was
-silently skipped.
+Escape hatches: `SKIP_PULL=1` skips git pull (manual rsync workflow);
+`SKIP_MIGRATE=1` skips Django migrations (rare; e.g., redeploying
+the same code after a restart).
 
-**Manual deploy fallback.** Render's dashboard has a "Manual Deploy"
-button that lets me roll back to a prior commit on `main` without
-reverting in git. Use this for "production is broken, need to roll
-back NOW" — then commit the actual revert afterward so the git state
-matches what's deployed.
+**Manual rollback.** If a deploy ships bad code:
+1. SSH to droplet, `cd /home/app/family-books`.
+2. `git checkout <previous-good-sha>`.
+3. `SKIP_PULL=1 ./scripts/deploy.sh`.
+
+For irreversible-migration cases, see `docs/ROLLBACK.md` § 3 — the
+pre-migration backup + `restore_db --confirm-prod-restore` path.
+
+Historical note: a previous version of this doc described Render-based
+auto-deploy. That approach was abandoned before the first deploy in
+favor of the Docker/DO pattern (which mirrors the rowe-contest
+project on the same operator's hand). The artifact is preserved at
+`docs/historical/render.yaml.unused` for archaeology.
 
 ## Deploy gating chain
 
-The implicit gating walks like this:
+The chain walks like this:
 
 1. I push to a feature branch. CI runs.
 2. I open a PR into main. CI runs again on the PR ref.
@@ -187,14 +205,13 @@ The implicit gating walks like this:
    - the branch is up to date with main
    - any PR conversations are resolved
 4. I merge (rebase) to main.
-5. Render's webhook fires. Render runs its build and starts the new
-   service.
-6. If the Render build fails, the previous deploy stays live; no
-   automatic rollback, but no broken state shipped either.
-
-The chain has no explicit "wait for CI before deploying" step in
-`render.yaml`. It doesn't need one: branch protection is the gate.
-A Render-side gate would be redundant and add a second failure mode.
+5. **Manual step**: when ready to ship, SSH to the droplet and run
+   `./scripts/deploy.sh`. The script's first action is `git pull
+   --ff-only`, so the droplet sees only what's on main.
+6. If the deploy fails mid-script, the previous container is still
+   running (deploy.sh restarts via `up -d --no-deps web`, which is
+   atomic at the container level). Rolling back is `git checkout
+   <previous-sha> && SKIP_PULL=1 ./scripts/deploy.sh`.
 
 ## When the chain breaks
 
