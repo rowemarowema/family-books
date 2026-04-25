@@ -64,8 +64,14 @@ from hypothesis import strategies as st  # noqa: E402
 
 
 @hypothesis.given(
-    sys_order=st.integers(max_value=-1),
-    user_order=st.integers(min_value=0, max_value=1_000_000),
+    # Bound to ±1000 — well inside Postgres INTEGER (±2^31-1) AND within
+    # the practical range admins would ever type. The semantic property
+    # we're proving is "negative always sorts above non-negative under
+    # the default queryset ordering"; that property is independent of
+    # absolute magnitude, so a tight range gives faster shrinking and
+    # avoids generating values that overflow the column type.
+    sys_order=st.integers(min_value=-1000, max_value=-1),
+    user_order=st.integers(min_value=0, max_value=1000),
 )
 @hypothesis.settings(
     max_examples=25,
@@ -96,7 +102,14 @@ def test_property_negative_always_sorts_above_non_negative(
 
 @pytest.mark.django_db
 def test_composite_index_exists_in_pg():
-    """The `(display_order, name)` index must be present and in that order."""
+    """The `(display_order, name)` index must be present and in that order.
+
+    Parses the parenthesized column list out of pg_indexes.indexdef
+    rather than substring-searching the whole CREATE INDEX text — the
+    word "name" appears in the index identifier
+    (`account_disporder_name_idx`) and would always match before
+    reaching the column list.
+    """
     with connection.cursor() as cursor:
         cursor.execute(
             """
@@ -112,12 +125,17 @@ def test_composite_index_exists_in_pg():
         "Did migration 0003_account_display_order get applied?"
     )
     indexdef = row[0]
-    # Don't pin the exact CREATE INDEX text (column quoting varies); just
-    # require the column-order substring.
-    assert "display_order" in indexdef
-    assert "name" in indexdef
-    assert indexdef.index("display_order") < indexdef.index("name"), (
-        f"Composite index has columns in the wrong order: {indexdef}"
+
+    # Postgres returns indexdef like:
+    #   CREATE INDEX account_disporder_name_idx ON public.account
+    #     USING btree (display_order, name)
+    # Pull out the parenthesized column list and split on commas.
+    after_using = indexdef.split("USING btree", 1)[1]
+    col_list_text = after_using.strip().strip("()")
+    cols = [c.strip().strip('"') for c in col_list_text.split(",")]
+
+    assert cols == ["display_order", "name"], (
+        f"Composite index has wrong column order: {cols} (raw: {indexdef!r})"
     )
 
 

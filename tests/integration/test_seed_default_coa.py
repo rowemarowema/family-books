@@ -320,40 +320,70 @@ def test_hierarchy_cycle_refuses(tmp_path):
     assert "cycle" in str(exc.value).lower()
 
 
+def _append_chain_node(fixture: dict, account_number: str, parent_number: str) -> None:
+    """Add one more leaf to fixture['accounts'] under the named parent."""
+    fixture["accounts"].append({
+        "account_number": account_number,
+        "name": f"Node {account_number}",
+        "full_path": f"Chain:{account_number}",
+        "type": "Asset",
+        "normal_balance": "Debit",
+        "parent_account_number": parent_number,
+        "is_active": True,
+        "is_system": False,
+        "display_order": 0,
+        "description": None,
+        "tax_category": None,
+    })
+
+
+@pytest.mark.django_db
+def test_hierarchy_depth_4_boundary_succeeds(tmp_path):
+    """Boundary: depth = MAX_HIERARCHY_DEPTH (4) is allowed.
+
+    Chain: 1-0001 (d1) -> 1-0002 (d2) -> 1-0004 (d3) -> 1-0005 (d4).
+    The check is `depth > MAX_HIERARCHY_DEPTH`, so d=4 must pass.
+    """
+    fixture = _minimal_fixture()
+    _append_chain_node(fixture, "1-0004", "1-0002")  # depth 3
+    _append_chain_node(fixture, "1-0005", "1-0004")  # depth 4 (boundary)
+    fix = _write_fixture(tmp_path, fixture)
+
+    call_command("seed_default_coa", "--fixture", str(fix))
+
+    leaf = Account.objects.get(account_number="1-0005")
+    # Walk parent chain to confirm the loaded depth is exactly 4.
+    depth = 1
+    node = leaf.parent_account
+    while node is not None:
+        depth += 1
+        node = node.parent_account
+    assert depth == 4
+
+
 @pytest.mark.django_db
 def test_hierarchy_depth_5_refuses(tmp_path):
+    """A chain of 5 nodes must trip the in-memory depth walker.
+
+    bulk_create skips Account.clean()'s depth check, so the loader's
+    own walker is the only enforcer at this surface. This test fails
+    if the walker is misimplemented (e.g., off-by-one, wrong loop
+    condition, or skipping subtrees that don't include the deepest
+    leaf).
+
+    Chain: 1-0001 -> 1-0002 -> 1-0004 -> 1-0005 -> 1-0006 (depth 5).
+    """
     fixture = _minimal_fixture()
-    # Build a 5-deep chain by appending two more accounts.
-    fixture["accounts"].append({
-        "account_number": "1-0004",
-        "name": "L4",
-        "full_path": "Cash:Checking:Sub:L4",
-        "type": "Asset",
-        "normal_balance": "Debit",
-        "parent_account_number": "1-0002",  # depth-3 parent
-        "is_active": True,
-        "is_system": False,
-        "display_order": 0,
-        "description": None,
-        "tax_category": None,
-    })
-    fixture["accounts"].append({
-        "account_number": "1-0005",
-        "name": "L5",
-        "full_path": "Cash:Checking:Sub:L4:L5",
-        "type": "Asset",
-        "normal_balance": "Debit",
-        "parent_account_number": "1-0004",  # depth-4 parent → child is depth-5
-        "is_active": True,
-        "is_system": False,
-        "display_order": 0,
-        "description": None,
-        "tax_category": None,
-    })
+    _append_chain_node(fixture, "1-0004", "1-0002")  # depth 3
+    _append_chain_node(fixture, "1-0005", "1-0004")  # depth 4
+    _append_chain_node(fixture, "1-0006", "1-0005")  # depth 5 -> must trip
     fix = _write_fixture(tmp_path, fixture)
+
     with pytest.raises(CommandError) as exc:
         call_command("seed_default_coa", "--fixture", str(fix))
     assert "depth" in str(exc.value).lower()
+    # Refusal must preempt all DB writes.
+    assert Account.objects.count() == 0
 
 
 @pytest.mark.django_db
