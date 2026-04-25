@@ -25,7 +25,6 @@ from books.accounting.admin import AccountAdmin
 from books.accounting.factories import AccountFactory
 from books.accounting.models import Account
 
-
 # --- Meta.ordering drift -------------------------------------------------
 
 

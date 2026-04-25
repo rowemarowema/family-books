@@ -18,11 +18,9 @@ header / footer chrome differ.
 """
 from __future__ import annotations
 
-from typing import Any
-
 from django.template.loader import render_to_string
 
-from books.accounting.reports.trial_balance import TrialBalance, TYPE_ORDER
+from books.accounting.reports.trial_balance import TYPE_ORDER, TrialBalance
 
 
 class PDFRendererUnavailable(RuntimeError):

@@ -40,12 +40,9 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from books.accounting.models import (
-    Account,
-    AccountType,
     MAX_HIERARCHY_DEPTH,
-    NormalBalance,
+    Account,
 )
-
 
 REQUIRED_TOP_LEVEL_KEYS = {"system_accounts", "accounts"}
 REQUIRED_ROW_KEYS = {
@@ -202,7 +199,7 @@ class Command(BaseCommand):
 
     def _read_and_parse(self, path: Path) -> dict[str, Any]:
         try:
-            with open(path, "r", encoding="utf-8") as fp:
+            with open(path, encoding="utf-8") as fp:
                 return json.load(fp)
         except json.JSONDecodeError as exc:
             raise CommandError(f"Invalid JSON in {path}: {exc}") from exc

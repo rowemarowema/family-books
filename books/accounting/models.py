@@ -30,7 +30,6 @@ from django.db.models import CheckConstraint, Q, UniqueConstraint
 
 from books.accounting.exceptions import PostedEntryImmutable
 
-
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
@@ -88,7 +87,7 @@ class Account(models.Model):
     convention-only at the model layer (no regex validator). The default
     COA fixture (`fixtures/default_coa.json`) uses
     `{type-prefix}-{4-digit sequence}` — e.g., `1-0001` for the first
-    Asset, `5-0164` for an Expense, `3-9000`–`3-9200` for system Equity
+    Asset, `5-0164` for an Expense, `3-9000`-`3-9200` for system Equity
     accounts. Callers can pick any layout that fits in 16 chars; the
     seed file is the source of truth for Mark's books. See Batch #4 in
     project_decisions.md / docs/DECISIONS.md.

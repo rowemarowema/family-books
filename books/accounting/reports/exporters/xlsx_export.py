@@ -21,13 +21,11 @@ the display string.
 from __future__ import annotations
 
 import io
-from decimal import Decimal
 
 from openpyxl import Workbook
 from openpyxl.styles import Font
 
 from books.accounting.reports.trial_balance import TrialBalance, TrialBalanceRow
-
 
 COLUMNS_BASE = [
     "account_number",

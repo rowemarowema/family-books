@@ -50,5 +50,5 @@ def test_request_after_cap_logs_out_and_redirects(owner, settings):
     assert resp.status_code == 302
     assert resp.url.startswith(settings.LOGIN_URL) or "login" in resp.url.lower()
     # User should be anonymous on the next request.
-    resp2 = client.get("/health")
+    client.get("/health")
     assert "_auth_user_id" not in client.session

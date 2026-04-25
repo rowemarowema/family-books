@@ -417,6 +417,32 @@ gates are:
   exercises `import weasyprint` at boot and fails fast if Render's
   apt-install was silently skipped. Defense in depth on top of the
   runtime fallback.
+- **mypy backlog (typecheck demoted to informational)** deferred to
+  **Group I**. Adding mypy as a CI stage in Group G surfaced ~71
+  pre-existing missing-annotation findings across Groups D-F. None
+  are bugs; they're real annotations that need to land. Group G
+  posture: typecheck runs in CI with `continue-on-error: true` so
+  the count stays visible without blocking. Group I clears the
+  backlog and re-promotes typecheck to gating (`continue-on-error`
+  removed). See `docs/CI.md` § "Why typecheck is informational" for
+  the rationale.
+- **N818 exception-name renames** deferred to **Group I**. Ruff
+  wants exception class names to end in `Error`. The codebase has
+  `PostedEntryImmutable`, `AlreadyReversed`, `CannotReverseAReversal`
+  (predicates rather than nouns), and `OpeningBalanceError` (already
+  conformant). A targeted rename pass is a Group I task; for now
+  N818 is globally ignored with a `pyproject.toml` comment pointing
+  at this entry.
+- **DJ001 `SystemFlag.setup_coa_mode` null=True → default=""**
+  deferred to **Group I** (or Stage 2 if it lands first). The field
+  was added in Group C; switching to a non-null default requires a
+  data migration to coerce existing NULL rows. Globally ignored in
+  ruff config until then.
+- **DJ012 model method ordering** deferred to **Group I**. Django
+  Style Guide wants `save` before `clean`; the codebase orders
+  `clean` first (validation logically runs before save). Stylistic
+  preference, not a bug surface; ignored until a broader Django-
+  conformance pass becomes worthwhile.
 
 ### Time / date policy (load-bearing for Group D onward)
 

@@ -20,7 +20,6 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Iterable
 
 import pytest
 from bs4 import BeautifulSoup
@@ -31,7 +30,6 @@ from django.urls import reverse
 from books.accounting.factories import (
     AccountFactory,
     EquityAccountFactory,
-    LiabilityAccountFactory,
     RevenueAccountFactory,
     make_balanced_entry,
 )
@@ -45,7 +43,6 @@ from books.accounting.reports.trial_balance import (
     TYPE_ORDER,
     compute_trial_balance,
 )
-
 
 TWO_DP = Decimal("0.01")
 
@@ -290,7 +287,7 @@ def test_cell_level_tie_out_engine_to_html(
 
     assert len(html_rows) == len(engine_rows)
 
-    for engine_row, tr in zip(engine_rows, html_rows):
+    for engine_row, tr in zip(engine_rows, html_rows, strict=True):
         assert int(tr["data-account-pk"]) == engine_row.account.pk
 
         for cell, engine_field in [

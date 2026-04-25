@@ -33,7 +33,6 @@ from books.accounting.opening_balances import (
 )
 from books.audit.models import AuditAction, AuditLog
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -236,7 +235,7 @@ def test_display_fields_updated_on_account(owner, cash):
 
 
 @pytest.mark.django_db
-def test_reference_number_uses_OB_prefix(owner, cash):
+def test_reference_number_uses_ob_prefix(owner, cash):
     result = set_opening_balance(
         cash, amount=Decimal("100.00"), as_of=date(2001, 1, 1), user=owner,
     )

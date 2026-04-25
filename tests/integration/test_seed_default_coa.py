@@ -23,7 +23,6 @@ from books.accounting.factories import AccountFactory
 from books.accounting.models import Account, AccountType, NormalBalance
 from books.audit.models import AuditAction, AuditLog
 
-
 REAL_FIXTURE = Path(settings.BASE_DIR) / "fixtures" / "default_coa.json"
 
 

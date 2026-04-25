@@ -13,7 +13,6 @@ Coverage:
 from __future__ import annotations
 
 import csv
-import io
 from datetime import date
 from decimal import Decimal
 from io import StringIO
@@ -27,7 +26,6 @@ from django.core.management.base import CommandError
 from books.accounting.factories import (
     AccountFactory,
     EquityAccountFactory,
-    LiabilityAccountFactory,
 )
 from books.accounting.models import (
     Account,
@@ -38,7 +36,6 @@ from books.accounting.models import (
 from books.accounting.opening_balances import (
     OPENING_BALANCE_EQUITY_ACCOUNT_NUMBER,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

@@ -18,7 +18,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-
 WORKFLOW_PATH = (
     Path(__file__).resolve().parents[2]
     / ".github" / "workflows" / "ci.yml"
@@ -130,6 +129,35 @@ def test_concurrency_cancels_in_progress(workflow):
 # ---------------------------------------------------------------------------
 # GTK system libs (required for F.5 PDF export tests)
 # ---------------------------------------------------------------------------
+
+
+def test_typecheck_is_informational_only(steps):
+    """Group G posture: typecheck runs but is non-gating
+    (`continue-on-error: true`) because adding mypy as a CI stage
+    surfaced ~71 pre-existing missing-annotation findings across
+    Groups D-F. Backlog cleared and gate re-promoted in Group I.
+
+    This test fires if a future PR either:
+      (a) removes `continue-on-error: true` from the typecheck step
+          without clearing the backlog (premature promotion to gating),
+          OR
+      (b) removes the typecheck step entirely (loses the visibility
+          informational stages provide).
+
+    When Group I lands, this test gets updated to assert
+    `continue-on-error` is FALSE/absent — the activation diff for the
+    posture flip lands in test code, not silently in the workflow.
+    """
+    typecheck_step = next(
+        (s for s in steps if "typecheck" in s.get("name", "").lower()),
+        None,
+    )
+    assert typecheck_step is not None, "typecheck step missing"
+    assert typecheck_step.get("continue-on-error") is True, (
+        "typecheck should be informational (continue-on-error: true) "
+        "until Group I clears the mypy backlog. See PROGRESS.md "
+        "'Deferred' and docs/CI.md 'Why typecheck is informational'."
+    )
 
 
 def test_gtk_system_libs_apt_installed(steps):

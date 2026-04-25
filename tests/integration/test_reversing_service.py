@@ -59,7 +59,7 @@ def test_reverse_creates_mirror_entry(owner, posted_entry):
     reversal_lines = list(reversal.lines.order_by("id"))
 
     assert len(reversal_lines) == len(original_lines)
-    for orig, rev in zip(original_lines, reversal_lines):
+    for orig, rev in zip(original_lines, reversal_lines, strict=True):
         assert rev.account_id == orig.account_id
         assert rev.debit_amount == orig.credit_amount
         assert rev.credit_amount == orig.debit_amount

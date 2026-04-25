@@ -22,10 +22,10 @@ Two ORM passes max:
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
-from typing import Iterable
 
 from django.db.models import DecimalField, Sum, Value
 from django.db.models.functions import Coalesce
@@ -80,7 +80,7 @@ class TrialBalanceRow:
     prior_own_balance: Decimal | None = None
     prior_rollup_balance: Decimal | None = None
     depth: int = 1
-    children: list["TrialBalanceRow"] = field(default_factory=list)
+    children: list[TrialBalanceRow] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -264,7 +264,7 @@ def _visible_account_pks(
         return set(accounts_by_pk.keys())
 
     visible: set[int] = set()
-    for pk, account in accounts_by_pk.items():
+    for pk in accounts_by_pk:
         s = sums.get(pk)
         if s is None:
             continue  # no activity at all

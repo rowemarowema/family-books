@@ -42,7 +42,6 @@ from books.accounting.reports.trial_balance import (
     compute_trial_balance,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -457,7 +456,7 @@ def test_reversed_opening_balances_net_to_zero_in_trial_balance(
                Decimal("400.00"), Decimal("500.00"), Decimal("600.00")]
 
     results = []
-    for acct, amt in zip(accounts, amounts):
+    for acct, amt in zip(accounts, amounts, strict=True):
         results.append(
             set_opening_balance(
                 acct, amount=amt, as_of=date(2001, 1, 1), user=owner,
@@ -483,7 +482,7 @@ def test_reversed_opening_balances_net_to_zero_in_trial_balance(
         )
 
     # Un-reversed accounts: own_balance == original amount.
-    for acct, amt in zip(accounts[3:], amounts[3:]):
+    for acct, amt in zip(accounts[3:], amounts[3:], strict=True):
         rows = [r for r in _walk_rows(tb.rows) if r.account.pk == acct.pk]
         assert len(rows) == 1
         assert rows[0].own_balance == amt, (

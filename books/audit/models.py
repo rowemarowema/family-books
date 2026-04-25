@@ -117,7 +117,7 @@ class AuditLog(models.Model):
         after: Any = None,
         reason: str = "",
         ip_address: str | None = None,
-    ) -> "AuditLog":
+    ) -> AuditLog:
         """
         Append an audit entry. Always use this helper; never instantiate
         AuditLog() directly, because downstream code assumes rows are

@@ -8,5 +8,5 @@ class CoreConfig(AppConfig):
 
     def ready(self) -> None:
         # Importing the module registers the pre_save receiver via @receiver.
-        from . import signals  # noqa: F401
+        from . import signals
         signals.connect_auth_signals()

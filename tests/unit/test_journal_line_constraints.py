@@ -18,7 +18,6 @@ from books.accounting.models import (
     NormalBalance,
 )
 
-
 # ---------------------------------------------------------------------------
 # pg_catalog drift detection (D.C4 acceptance)
 # ---------------------------------------------------------------------------

@@ -20,8 +20,7 @@ from pathlib import Path
 import pytest
 from django.conf import settings
 
-from books.accounting.models import AccountType, NormalBalance
-
+from books.accounting.models import AccountType
 
 USER_ACCOUNT_NUMBER_PATTERN = re.compile(r"^[1-5]-\d{4}$")
 SYSTEM_ACCOUNT_NUMBER_PATTERN = re.compile(r"^3-9\d{3}$")
@@ -30,7 +29,7 @@ SYSTEM_ACCOUNT_NUMBER_PATTERN = re.compile(r"^3-9\d{3}$")
 @pytest.fixture(scope="module")
 def fixture_data() -> dict:
     path = Path(settings.BASE_DIR) / "fixtures" / "default_coa.json"
-    with open(path, "r", encoding="utf-8") as fp:
+    with open(path, encoding="utf-8") as fp:
         return json.load(fp)
 
 

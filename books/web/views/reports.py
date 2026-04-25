@@ -40,7 +40,6 @@ from books.accounting.reports.trial_balance import (
 )
 from books.core.auth import owner_only_with_2fa
 
-
 # F.4 shipped html only; F.5 extends to csv/xlsx/pdf, all served via
 # the same URL with the format dispatched on the ?format= query param.
 VALID_FORMATS = ("html", "csv", "xlsx", "pdf")

@@ -6,7 +6,6 @@ from django.core.exceptions import ValidationError
 
 from books.accounting.models import Account, AccountType, NormalBalance
 
-
 # ---------------------------------------------------------------------------
 # Hierarchy depth
 # ---------------------------------------------------------------------------
@@ -42,13 +41,17 @@ def test_4_levels_save_ok_via_full_clean():
 @pytest.mark.django_db
 def test_5th_level_rejected_via_full_clean():
     a = _make_asset("1000", "Level1")
-    a.full_clean(); a.save()
+    a.full_clean()
+    a.save()
     b = _make_asset("1100", "Level2", parent=a)
-    b.full_clean(); b.save()
+    b.full_clean()
+    b.save()
     c = _make_asset("1110", "Level3", parent=b)
-    c.full_clean(); c.save()
+    c.full_clean()
+    c.save()
     d = _make_asset("1111", "Level4", parent=c)
-    d.full_clean(); d.save()
+    d.full_clean()
+    d.save()
     e = _make_asset("1112", "Level5", parent=d)
     with pytest.raises(ValidationError) as exc:
         e.full_clean()
@@ -71,7 +74,7 @@ def test_4_levels_save_ok_via_raw_create_signal_path():
         account_number="2110", name="Level3", parent_account=b,
         type=AccountType.ASSET, normal_balance=NormalBalance.DEBIT,
     )
-    d = Account.objects.create(
+    Account.objects.create(
         account_number="2111", name="Level4", parent_account=c,
         type=AccountType.ASSET, normal_balance=NormalBalance.DEBIT,
     )

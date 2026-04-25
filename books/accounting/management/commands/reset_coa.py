@@ -70,12 +70,9 @@ def _user_account_depth_buckets() -> dict[int, list[int]]:
             "id", "parent_account_id"
         )
     )
-    parent_of_user = {
-        row_id: parent_id
-        for row_id, parent_id in rows
-        # Only links into other user rows count for depth — system
-        # parents act as roots from the user-tree perspective.
-    }
+    # Only links into other user rows count for depth — system parents
+    # act as roots from the user-tree perspective.
+    parent_of_user = dict(rows)
     user_pks = {row_id for row_id, _ in rows}
 
     def depth_of(node_id: int) -> int:

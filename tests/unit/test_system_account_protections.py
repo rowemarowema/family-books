@@ -22,7 +22,6 @@ from books.accounting.factories import (
 )
 from books.accounting.models import Account, AccountType, NormalBalance
 
-
 # --- Rule 1: is_system requires Equity type --------------------------------
 
 

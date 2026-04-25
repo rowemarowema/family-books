@@ -83,7 +83,7 @@ class SystemFlag(models.Model):
         return f"SystemFlag(2fa={self.two_factor_enforcement_active})"
 
     @classmethod
-    def get(cls) -> "SystemFlag":
+    def get(cls) -> SystemFlag:
         """Fetch or lazily create the singleton row."""
         obj, _ = cls.objects.get_or_create(id=cls.SINGLETON_PK)
         return obj

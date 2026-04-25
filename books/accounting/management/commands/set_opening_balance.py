@@ -52,7 +52,6 @@ from books.accounting.exceptions import OpeningBalanceError
 from books.accounting.models import Account
 from books.accounting.opening_balances import set_opening_balance
 
-
 REQUIRED_CSV_COLUMNS = {"account_number", "account_path", "amount", "as_of"}
 
 
@@ -229,7 +228,7 @@ class Command(BaseCommand):
         return user
 
     def _read_csv(self, path: Path) -> list[dict[str, str]]:
-        with open(path, "r", encoding="utf-8", newline="") as fp:
+        with open(path, encoding="utf-8", newline="") as fp:
             reader = csv.DictReader(fp)
             if reader.fieldnames is None:
                 raise CommandError(f"{path}: missing header row.")

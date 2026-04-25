@@ -21,23 +21,21 @@ from django.core.management.base import CommandError
 
 from books.accounting.factories import (
     AccountFactory,
+    CreditLineFactory,
+    DebitLineFactory,
     EquityAccountFactory,
     JournalEntryFactory,
-    DebitLineFactory,
-    CreditLineFactory,
     make_balanced_entry,
 )
 from books.accounting.models import (
     Account,
     AccountType,
-    JournalEntry,
     JournalEntryStatus,
     JournalLine,
     NormalBalance,
 )
 from books.accounting.posting import post_entry
 from books.audit.models import AuditAction, AuditLog
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -314,7 +312,7 @@ def test_reset_coa_handles_simple_parent_child_tree():
         type=AccountType.ASSET,
         normal_balance=NormalBalance.DEBIT,
     )
-    checking = AccountFactory(
+    AccountFactory(
         account_number="1-0002",
         name="Checking",
         type=AccountType.ASSET,

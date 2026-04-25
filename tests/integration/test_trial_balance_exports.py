@@ -48,7 +48,6 @@ from books.accounting.posting import post_entry
 from books.accounting.reports.trial_balance import compute_trial_balance
 from books.web.views.reports import VALID_FORMATS
 
-
 TWO_DP = Decimal("0.01")
 
 
@@ -272,7 +271,7 @@ def test_cell_level_round_trip_html_csv_xlsx_match_engine(
         totals_tr.find("td", attrs={"data-cell": "total_debits"})["data-value"]
     )
     csv_reader = csv.DictReader(io.StringIO(csv_resp.content.decode("utf-8")))
-    csv_total_row = [r for r in csv_reader if r["account_number"] == "TOTAL"][0]
+    csv_total_row = next(r for r in csv_reader if r["account_number"] == "TOTAL")
     csv_total_dr = Decimal(csv_total_row["debits"])
     xlsx_wb = load_workbook(io.BytesIO(xlsx_resp.content), data_only=False)
     xlsx_ws = xlsx_wb["Trial Balance"]

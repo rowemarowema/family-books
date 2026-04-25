@@ -1,7 +1,7 @@
 """Settings for pytest runs."""
 from __future__ import annotations
 
-from .base import *  # noqa: F401, F403
+from .base import *  # noqa: F403
 
 DEBUG = False
 
@@ -17,7 +17,7 @@ PASSWORD_HASHERS = [
 import os  # noqa: E402
 
 if "TEST_DATABASE_URL" in os.environ:
-    import environ as _environ  # noqa: E402
+    import environ as _environ
     DATABASES = {"default": _environ.Env().db("TEST_DATABASE_URL")}
 
 EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"

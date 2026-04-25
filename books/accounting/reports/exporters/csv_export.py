@@ -22,8 +22,7 @@ from __future__ import annotations
 import csv
 import io
 
-from books.accounting.reports.trial_balance import TrialBalance, TrialBalanceRow
-
+from books.accounting.reports.trial_balance import TrialBalance
 
 COLUMNS_BASE = [
     "account_number",

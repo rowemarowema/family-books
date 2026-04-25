@@ -28,7 +28,6 @@ from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from django.conf import settings
 from django.db import transaction
 
 from books.accounting.exceptions import OpeningBalanceError
@@ -74,7 +73,7 @@ def set_opening_balance(
     *,
     amount: Decimal,
     as_of: date,
-    user: "AbstractUser",
+    user: AbstractUser,
     reason: str = "Opening balance",
     offset_account: Account | None = None,
 ) -> OpeningBalanceResult:
@@ -255,7 +254,7 @@ def set_opening_balance(
 def reverse_opening_balance(
     result: OpeningBalanceResult,
     *,
-    user: "AbstractUser",
+    user: AbstractUser,
     reason: str,
     as_of: date | None = None,
 ) -> JournalEntry:
@@ -295,7 +294,7 @@ def _audit_refusal(
     account: Account,
     amount: Decimal | None,
     as_of: date,
-    user: "AbstractUser",
+    user: AbstractUser,
     why: str,
 ) -> None:
     from books.audit.models import AuditAction, AuditLog
