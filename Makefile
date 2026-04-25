@@ -54,8 +54,8 @@ test: ## Run the full pytest suite with coverage gates.
 	pytest --cov=books --cov-report=term-missing --cov-report=html
 
 .PHONY: test-fast
-test-fast: ## Run the test suite without coverage (faster feedback loop).
-	pytest -x --ff
+test-fast: ## Iteration loop: --reuse-db + -x + --ff. Drop to `make test` after migration changes.
+	pytest --reuse-db -x --ff
 
 .PHONY: dataset
 dataset: ## Load the seed test dataset (populated in later stages).
