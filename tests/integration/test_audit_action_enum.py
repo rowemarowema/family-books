@@ -73,6 +73,11 @@ def test_audit_action_covers_all_known_origins():
         # Opening balances / Group F
         "opening_balance_set",
         "opening_balance_refused",
+        # Backups / Group H
+        "backup_created",
+        "backup_restored",
+        "backup_drill_passed",
+        "backup_drill_failed",
     }
     assert set(AuditAction.values) == expected
 

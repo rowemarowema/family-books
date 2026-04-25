@@ -64,6 +64,12 @@ class AuditAction(models.TextChoices):
         "Opening balance refused",
     )
 
+    # --- Backups / Group H ---
+    BACKUP_CREATED = "backup_created", "Backup created"
+    BACKUP_RESTORED = "backup_restored", "Backup restored"
+    BACKUP_DRILL_PASSED = "backup_drill_passed", "Backup drill passed"
+    BACKUP_DRILL_FAILED = "backup_drill_failed", "Backup drill failed"
+
 
 class AuditLog(models.Model):
     entity_type = models.CharField(max_length=64, db_index=True)
