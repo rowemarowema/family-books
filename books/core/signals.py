@@ -39,13 +39,13 @@ def refuse_second_user(sender: Any, instance: Any, **kwargs: Any) -> None:
 
 def _on_axes_lockout(*, request: Any, credentials: dict[str, Any] | None = None, **_: Any) -> None:
     """Log django-axes lockouts to the audit trail."""
-    from books.audit.models import AuditLog
+    from books.audit.models import AuditAction, AuditLog
 
     username = (credentials or {}).get("username", "")
     AuditLog.record(
         entity_type="User",
         entity_id=username,
-        action="auth_lockout",
+        action=AuditAction.AUTH_LOCKOUT,
         reason="django-axes failure threshold hit; account locked.",
         ip_address=_req_ip(request),
     )
@@ -53,12 +53,12 @@ def _on_axes_lockout(*, request: Any, credentials: dict[str, Any] | None = None,
 
 def _on_axes_user_locked_out(*, request: Any, username: str | None = None, **_: Any) -> None:
     """Alternate axes signal name used in newer releases."""
-    from books.audit.models import AuditLog
+    from books.audit.models import AuditAction, AuditLog
 
     AuditLog.record(
         entity_type="User",
         entity_id=username or "",
-        action="auth_lockout",
+        action=AuditAction.AUTH_LOCKOUT,
         reason="django-axes failure threshold hit; account locked.",
         ip_address=_req_ip(request),
     )
@@ -66,13 +66,13 @@ def _on_axes_user_locked_out(*, request: Any, username: str | None = None, **_: 
 
 def _on_login_failed(*, credentials: dict[str, Any] | None = None, request: Any = None, **_: Any) -> None:
     """Log every failed login attempt (axes handles lockout; we handle the audit row)."""
-    from books.audit.models import AuditLog
+    from books.audit.models import AuditAction, AuditLog
 
     username = (credentials or {}).get("username", "")
     AuditLog.record(
         entity_type="User",
         entity_id=username,
-        action="auth_login_failed",
+        action=AuditAction.AUTH_LOGIN_FAILED,
         ip_address=_req_ip(request) if request is not None else None,
     )
 

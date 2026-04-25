@@ -87,7 +87,7 @@ class TwoFactorEnforcementMiddleware:
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
         # Local imports keep this module importable before migrations run.
-        from books.audit.models import AuditLog
+        from books.audit.models import AuditAction, AuditLog
         from books.core.models import SystemFlag
 
         flag = SystemFlag.get()
@@ -98,7 +98,7 @@ class TwoFactorEnforcementMiddleware:
             AuditLog.record(
                 entity_type="SystemFlag",
                 entity_id=flag.pk,
-                action="two_factor_enforcement_activated",
+                action=AuditAction.TWO_FACTOR_ENFORCEMENT_ACTIVATED,
                 user=request.user if request.user.is_authenticated else None,
                 reason="REQUIRE_2FA=True observed; activating sticky enforcement.",
                 ip_address=_client_ip(request),
@@ -114,7 +114,7 @@ class TwoFactorEnforcementMiddleware:
             AuditLog.record(
                 entity_type="SystemFlag",
                 entity_id=flag.pk,
-                action="two_factor_enforcement_auto_re_enabled",
+                action=AuditAction.TWO_FACTOR_ENFORCEMENT_AUTO_RE_ENABLED,
                 reason="24-hour grace window expired.",
                 ip_address=_client_ip(request),
             )

@@ -39,7 +39,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args: Any, **options: Any) -> None:
-        from books.audit.models import AuditLog
+        from books.audit.models import AuditAction, AuditLog
         from books.core.models import SystemFlag
 
         reason = options["confirm_disable"].strip()
@@ -77,7 +77,7 @@ class Command(BaseCommand):
         AuditLog.record(
             entity_type="SystemFlag",
             entity_id=flag.pk,
-            action="two_factor_enforcement_disabled",
+            action=AuditAction.TWO_FACTOR_ENFORCEMENT_DISABLED,
             before=before,
             after=after,
             reason=reason,

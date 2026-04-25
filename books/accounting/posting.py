@@ -32,7 +32,7 @@ from books.accounting.models import (
     JournalEntryStatus,
     JournalLine,
 )
-from books.audit.models import AuditLog
+from books.audit.models import AuditAction, AuditLog
 
 ZERO = Decimal("0.00")
 
@@ -98,7 +98,7 @@ def post_entry(entry: JournalEntry, *, user, reason: str = "") -> JournalEntry:
     AuditLog.record(
         entity_type="JournalEntry",
         entity_id=entry.pk,
-        action="post_entry",
+        action=AuditAction.POST_ENTRY,
         user=user,
         before={"status": JournalEntryStatus.DRAFT.value},
         after=_snapshot_after_post(entry, lines, total_debits, total_credits),
@@ -198,7 +198,7 @@ def reverse_entry(
     AuditLog.record(
         entity_type="JournalEntry",
         entity_id=reversal.pk,
-        action="reverse_entry",
+        action=AuditAction.REVERSE_ENTRY,
         user=user,
         before=None,
         after={

@@ -36,7 +36,7 @@ class Command(BaseCommand):
         from django_otp.plugins.otp_static.models import StaticDevice
         from django_otp.plugins.otp_totp.models import TOTPDevice
 
-        from books.audit.models import AuditLog
+        from books.audit.models import AuditAction, AuditLog
 
         reason = options["confirm_reset"].strip()
         if not reason:
@@ -56,7 +56,7 @@ class Command(BaseCommand):
         AuditLog.record(
             entity_type="User",
             entity_id=owner.pk,
-            action="reset_2fa_devices",
+            action=AuditAction.RESET_2FA_DEVICES,
             user=owner,
             before={"totp_devices": totp_count, "static_devices": static_count},
             after={"totp_devices": 0, "static_devices": 0},

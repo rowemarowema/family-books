@@ -1,0 +1,135 @@
+"""Account ordering, index, and admin-field-exposure tests.
+
+Three things in one module — they all hang off the Group E commit-1
+schema change:
+
+1. Meta.ordering drift — locks Account._meta.ordering to
+   ["display_order", "name"] so a future `git revert` can't quietly
+   restore the old single-column sort.
+2. Index drift — confirms the composite (display_order, name) index
+   exists in PG; same `pg_indexes` introspection style as Group D's
+   constraint drift tests.
+3. Admin form exposure — refinement #3 from the Group E breakdown.
+   `display_order` MUST appear in the admin change form (editable);
+   `is_system` MUST be readonly. Tests the ModelAdmin directly so we
+   don't have to satisfy the 2FA login flow in this test.
+"""
+from __future__ import annotations
+
+import pytest
+from django.contrib.admin.sites import AdminSite
+from django.db import connection
+from django.test import RequestFactory
+
+from books.accounting.admin import AccountAdmin
+from books.accounting.factories import AccountFactory
+from books.accounting.models import Account
+
+
+# --- Meta.ordering drift -------------------------------------------------
+
+
+def test_account_meta_ordering_is_display_order_then_name():
+    assert Account._meta.ordering == ["display_order", "name"]
+
+
+@pytest.mark.django_db
+def test_default_queryset_sorts_by_display_order_then_name():
+    """Negative display_order sorts above default (0); name breaks ties."""
+    AccountFactory(account_number="A1", name="Zebra", display_order=0)
+    AccountFactory(account_number="A2", name="Aardvark", display_order=0)
+    AccountFactory(account_number="A3", name="Anything", display_order=-100)
+
+    ordered = list(Account.objects.values_list("account_number", flat=True))
+    assert ordered == ["A3", "A2", "A1"]
+
+
+@pytest.mark.django_db
+def test_negative_display_order_sorts_above_default():
+    """Property-shaped: any negative display_order sorts before 0."""
+    a_user = AccountFactory(account_number="U1", name="User", display_order=0)
+    a_sys = AccountFactory(
+        account_number="S1", name="System", display_order=-1
+    )
+    ordered = list(Account.objects.values_list("pk", flat=True))
+    assert ordered == [a_sys.pk, a_user.pk]
+
+
+# --- Index drift ---------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_composite_index_exists_in_pg():
+    """The `(display_order, name)` index must be present and in that order."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT indexdef FROM pg_indexes
+            WHERE tablename = 'account'
+              AND indexname = 'account_disporder_name_idx'
+            """
+        )
+        row = cursor.fetchone()
+
+    assert row is not None, (
+        "Composite index `account_disporder_name_idx` is missing. "
+        "Did migration 0003_account_display_order get applied?"
+    )
+    indexdef = row[0]
+    # Don't pin the exact CREATE INDEX text (column quoting varies); just
+    # require the column-order substring.
+    assert "display_order" in indexdef
+    assert "name" in indexdef
+    assert indexdef.index("display_order") < indexdef.index("name"), (
+        f"Composite index has columns in the wrong order: {indexdef}"
+    )
+
+
+# --- Admin form exposure (refinement #3) --------------------------------
+
+
+def _admin_request_factory():
+    """Minimal request stand-in for ModelAdmin.get_form/get_fieldsets."""
+    rf = RequestFactory()
+    request = rf.get("/admin/accounting/account/add/")
+    # ModelAdmin.get_form may consult request.user for permissions; we
+    # supply an anonymous-but-authenticated stub that says "yes" to the
+    # standard checks. Real auth is exercised by test_admin_owner_only.
+    class _StubUser:
+        is_active = True
+        is_staff = True
+        is_superuser = True
+
+        def has_perm(self, perm, obj=None):
+            return True
+
+        def has_perms(self, perms, obj=None):
+            return True
+
+    request.user = _StubUser()
+    return request
+
+
+def test_admin_exposes_display_order_in_fields():
+    assert "display_order" in AccountAdmin.fields
+    assert "display_order" in AccountAdmin.list_display
+
+
+def test_admin_marks_is_system_readonly():
+    assert "is_system" in AccountAdmin.readonly_fields
+
+
+@pytest.mark.django_db
+def test_admin_form_renders_display_order_as_editable():
+    """get_form() includes display_order in base_fields; is_system is excluded
+    because it's readonly. This is the functional check that the field is
+    actually editable through the admin change form."""
+    admin = AccountAdmin(Account, AdminSite())
+    request = _admin_request_factory()
+    form_class = admin.get_form(request)
+    assert "display_order" in form_class.base_fields, (
+        "display_order missing from admin form — it would not be editable."
+    )
+    assert "is_system" not in form_class.base_fields, (
+        "is_system appears as editable; it must be readonly."
+    )

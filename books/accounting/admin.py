@@ -1,7 +1,7 @@
 """Admin registrations for books.accounting on the custom admin site.
 
 The admin is read-heavy for accounts in Stage 1: the COA setup wizard
-(Group E) is the primary write path. Deletions are blocked by PROTECT
+(Group F+) is the primary write path. Deletions are blocked by PROTECT
 on JournalLine.account; the admin further disables delete.
 
 JournalEntry and JournalLine admins are intentionally absent from Stage 1:
@@ -9,6 +9,13 @@ posted entries are immutable so there's nothing to edit; draft entries
 will be shown in a richer form in Stage 2 when the transaction layer
 lands. Exposing raw journal CRUD here would invite bypassing the
 posting service.
+
+`display_order` is exposed as a plain editable IntegerField in Stage 1.
+The polished UI for reordering (drag-and-drop, bulk reorder) is deferred
+to Group I; this is the basic path so Mark can adjust ordering through
+the admin without dropping to a shell. `is_system` is rendered read-only
+because the only legitimate path to set it is via the `seed_default_coa`
+fixture loader.
 """
 from __future__ import annotations
 
@@ -26,12 +33,14 @@ class AccountAdmin(django_admin.ModelAdmin):
         "subtype",
         "normal_balance",
         "parent_account",
+        "display_order",
         "is_active",
+        "is_system",
         "opening_balance",
     )
-    list_filter = ("type", "is_active")
+    list_filter = ("type", "is_active", "is_system")
     search_fields = ("account_number", "name", "description")
-    ordering = ("account_number",)
+    ordering = ("display_order", "name")
     fields = (
         "account_number",
         "name",
@@ -39,12 +48,15 @@ class AccountAdmin(django_admin.ModelAdmin):
         "subtype",
         "parent_account",
         "normal_balance",
+        "display_order",
         "is_active",
+        "is_system",
         "description",
         "tax_category",
         "opening_balance",
         "opening_balance_date",
     )
+    readonly_fields = ("is_system",)
 
     def has_delete_permission(self, request, obj=None):  # type: ignore[override]
         # Accounts with posted lines are protected by on_delete=PROTECT

@@ -81,11 +81,11 @@ class Command(BaseCommand):
 
         # Audit the bootstrap itself. Imported late to avoid touching AuditLog
         # before migrations run during test setup.
-        from books.audit.models import AuditLog
+        from books.audit.models import AuditAction, AuditLog
         AuditLog.record(
             entity_type="User",
             entity_id=user.pk,
-            action="bootstrap_owner",
+            action=AuditAction.BOOTSTRAP_OWNER,
             user=user,
             after={"email": user.email, "is_superuser": True},
             reason="Initial system bootstrap.",

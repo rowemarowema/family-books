@@ -103,6 +103,12 @@ class Account(models.Model):
     )
     normal_balance = models.CharField(max_length=8, choices=NormalBalance.choices)
     is_active = models.BooleanField(default=True)
+    # System accounts are seeded by `seed_default_coa` from the
+    # `system_accounts` array of fixtures/default_coa.json. They cannot
+    # be deactivated, deleted (where the `is_system=False` filter is used
+    # by `reset_coa`), or have `is_system` flipped post-create. Group E
+    # (commit 2) layers the protection logic on top of this flag.
+    is_system = models.BooleanField(default=False, db_index=True)
     description = models.TextField(blank=True, default="")
     tax_category = models.CharField(max_length=64, blank=True, default="")
     opening_balance = models.DecimalField(
@@ -111,12 +117,18 @@ class Account(models.Model):
         default=Decimal("0.00"),
     )
     opening_balance_date = models.DateField(null=True, blank=True)
+    # Sort key for grouped views (type/parent groupings). User accounts default
+    # to 0 → alpha-by-name within their group; system accounts use negative
+    # values to sort to the top of their grouping. See Batch #4 in
+    # project_decisions.md and the COA fixture for the convention.
+    display_order = models.IntegerField(default=0, db_index=True)
 
     class Meta:
         db_table = "account"
-        ordering = ["account_number"]
+        ordering = ["display_order", "name"]
         indexes = [
             models.Index(fields=["type", "is_active"]),
+            models.Index(fields=["display_order", "name"]),
         ]
 
     def __str__(self) -> str:
