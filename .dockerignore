@@ -40,6 +40,11 @@ Thumbs.db
 .github/
 docs/
 *.md
+# README.md is referenced by pyproject.toml's `readme = "README.md"`
+# AND copied by the Dockerfile (both stages). Without this exception,
+# the COPY fails with "/README.md: not found" because *.md above
+# excludes it from the build context.
+!README.md
 
 # Tests live in the image only if we run them there (we don't —
 # CI runs them on the host). Keeps the image smaller.
