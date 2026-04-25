@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Trial Balance — {{ tb.as_of|date:"Y-m-d" }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-baseline mb-3">
+  <div>
+    <h1 class="h3 mb-0">Trial Balance</h1>
+    <div class="text-muted">As of {{ tb.as_of|date:"Y-m-d" }}{% if tb.prior_as_of %} — comparative {{ tb.prior_as_of|date:"Y-m-d" }}{% endif %}</div>
+  </div>
+  <div>
+    {% if tb.is_balanced %}
+      <span class="badge bg-success" data-test-role="balance-badge">Balanced</span>
+    {% else %}
+      <span class="badge bg-danger" data-test-role="balance-badge">OUT OF BALANCE</span>
+    {% endif %}
+  </div>
+</div>
+
+<table class="table table-sm table-hover" data-test-role="trial-balance">
+  <thead class="table-light">
+    <tr>
+      <th>Account #</th>
+      <th>Name</th>
+      <th class="text-end">Debits</th>
+      <th class="text-end">Credits</th>
+      <th class="text-end">Balance</th>
+      <th class="text-end">Rollup</th>
+      {% if tb.prior_as_of %}<th class="text-end">Prior Balance</th>{% endif %}
+    </tr>
+  </thead>
+  <tbody>
+    {% for group in groups %}
+      {# Type header — always rendered so structural-drift test sees all 5 #}
+      <tr data-test-role="type-header" data-type="{{ group.type_value }}">
+        <td colspan="{% if tb.prior_as_of %}7{% else %}6{% endif %}" class="fw-bold bg-light">
+          {{ group.type_label|upper }}
+        </td>
+      </tr>
+      {% for row in group.flat_rows %}
+        <tr data-account-pk="{{ row.account.pk }}" data-depth="{{ row.depth }}">
+          <td>{{ row.account.account_number }}</td>
+          <td style="padding-left: {{ row.depth }}rem">{{ row.account.name }}</td>
+          {% include "reports/_amount_cell.html" with cell="debits" value=row.debits_total %}
+          {% include "reports/_amount_cell.html" with cell="credits" value=row.credits_total %}
+          {% include "reports/_amount_cell.html" with cell="own_balance" value=row.own_balance %}
+          {% include "reports/_amount_cell.html" with cell="rollup_balance" value=row.rollup_balance %}
+          {% if tb.prior_as_of %}
+            {% include "reports/_amount_cell.html" with cell="prior_own_balance" value=row.prior_own_balance allow_none=True %}
+          {% endif %}
+        </tr>
+      {% endfor %}
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr class="fw-bold table-light" data-test-role="totals">
+      <td colspan="2">Total</td>
+      <td class="text-end" data-cell="total_debits" data-value="{{ tb.total_debits }}">{{ tb.total_debits|floatformat:2 }}</td>
+      <td class="text-end" data-cell="total_credits" data-value="{{ tb.total_credits }}">{{ tb.total_credits|floatformat:2 }}</td>
+      <td colspan="{% if tb.prior_as_of %}3{% else %}2{% endif %}" class="text-end" data-cell="is_balanced" data-value="{{ tb.is_balanced|yesno:'true,false' }}">
+        {% if tb.is_balanced %}Balanced{% else %}OUT OF BALANCE{% endif %}
+      </td>
+    </tr>
+  </tfoot>
+</table>
+{% endblock %}

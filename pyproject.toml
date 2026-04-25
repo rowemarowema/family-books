@@ -34,6 +34,9 @@ dev = [
     "hypothesis>=6.112,<7.0",
     "factory-boy>=3.3,<4.0",
     "faker>=30.0,<40.0",
+    # Group F.4: cell-level tie-out test parses rendered HTML and
+    # asserts each data-value matches the engine field. Test-only.
+    "beautifulsoup4>=4.12,<5.0",
     "ruff>=0.6,<1.0",
     "mypy>=1.11,<2.0",
     "django-stubs[compatible-mypy]>=5.1,<6.0",

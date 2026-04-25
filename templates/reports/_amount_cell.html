@@ -1,0 +1,21 @@
+{# Amount cell partial — renders one decimal-amount <td>.
+
+  Contract:
+    data-cell="<cell name>"  : machine-readable cell identifier
+    data-value="<raw value>" : the canonical Decimal as a string;
+                                cell-level tie-out tests parse this,
+                                NOT the displayed text.
+    Displayed text           : human-formatted; negatives in parens.
+
+  Args:
+    cell        (required): cell name (e.g. "debits", "own_balance")
+    value       (required): the Decimal, or None if allow_none
+    allow_none  (optional): if True, render empty cell when value is None
+#}
+{% if allow_none and value is None %}
+  <td class="text-end" data-cell="{{ cell }}" data-value=""></td>
+{% else %}
+  <td class="text-end" data-cell="{{ cell }}" data-value="{{ value }}">
+    {% if value < 0 %}({{ value|floatformat:2|cut:"-" }}){% else %}{{ value|floatformat:2 }}{% endif %}
+  </td>
+{% endif %}

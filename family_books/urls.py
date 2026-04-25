@@ -50,4 +50,6 @@ urlpatterns = [
     ),
     path("", include(two_factor_urls)),
     path("admin/", admin_site.urls),
+    # Owner-only reports (trial balance, etc.) — see books/web/urls.py.
+    path("", include("books.web.urls")),
 ]
