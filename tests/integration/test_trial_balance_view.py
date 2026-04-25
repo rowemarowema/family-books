@@ -177,6 +177,59 @@ def test_all_five_type_subheaders_present(owner_client):
 
 
 @pytest.mark.django_db
+def test_no_template_comment_leaks_in_rendered_body(
+    owner, owner_client, opening_balance_equity, revenue
+):
+    """Regression for the F.5 bug where _amount_cell.html's multi-
+    line {# ... #} docstring rendered literally because Django's
+    {# ... #} is single-line-only.
+
+    The cell-level tie-out test (test_cell_level_tie_out_engine_to_html
+    above) reads only data inside <td>, but the leaked text lived in
+    <tr> direct text nodes between cells — outside any <td>. So the
+    cell test stayed green while the rendered page leaked docstrings
+    into the user's view.
+
+    This regression test scans the FULL rendered body for tokens that
+    can only come from a leaked template comment, regardless of where
+    in the DOM they ended up. Catches the F.5 bug + any future
+    multi-line {# ... #} that slips in.
+
+    The check is broad on purpose: any of these substrings appearing
+    in production HTML is wrong.
+    """
+    # Need at least one rendered amount cell in the page so a leaking
+    # _amount_cell.html partial would manifest.
+    cash_acct = AccountFactory(
+        account_number="1-0001", name="Cash",
+        type=AccountType.ASSET, normal_balance=NormalBalance.DEBIT,
+    )
+    set_opening_balance(
+        cash_acct, amount=Decimal("100.00"),
+        as_of=date(2001, 1, 1), user=owner,
+    )
+
+    response = owner_client.get(reverse("trial-balance"))
+    body = response.content.decode("utf-8")
+
+    forbidden_substrings = [
+        "Amount cell partial",  # the docstring's first phrase
+        "machine-readable cell identifier",  # docstring contract line
+        "canonical Decimal as a string",  # docstring contract line
+        "{#",  # any unclosed comment marker
+        "{% comment %}",  # raw block-comment tag escaping the renderer
+        "{% endcomment %}",
+    ]
+    for s in forbidden_substrings:
+        assert s not in body, (
+            f"Rendered body contains forbidden template-comment "
+            f"artifact {s!r}. This usually means a {{#...#}} block "
+            "spans multiple lines (Django doesn't strip those) or a "
+            "template tag escaped the renderer."
+        )
+
+
+@pytest.mark.django_db
 def test_type_headers_lack_data_account_pk(owner_client):
     """Confirms the cell-level test's `data-account-pk` filter skips
     type-header rows without modification."""
