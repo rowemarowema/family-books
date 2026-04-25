@@ -40,19 +40,39 @@ forward-compatible.
 
 **Procedure:**
 
-1. Render dashboard → service → Manual Deploy → pick the prior
-   commit SHA (the one that was green before this deploy).
-2. Render rebuilds + restarts. ~3 minutes.
-3. After traffic recovers, `git revert <bad-sha>` locally; push;
-   the revert PR + CI green + merge → main → Render re-deploys
-   the reverted code. Now git state matches what's deployed.
+1. SSH to the droplet:
+   ```bash
+   ssh root@<droplet-ip>
+   cd /home/app/family-books
+   ```
+2. Check out the previous good commit:
+   ```bash
+   git fetch
+   git checkout <previous-good-sha>
+   ```
+3. Re-deploy with `SKIP_PULL=1` (don't fast-forward git again):
+   ```bash
+   SKIP_PULL=1 ./scripts/deploy.sh
+   ```
+   The script rebuilds + restarts the `web` container; postgres
+   and nginx stay up. Traffic recovers in ~30s once the new
+   container reports healthy.
+4. After traffic recovers, `git revert <bad-sha>` locally on your
+   laptop; push; the revert PR + CI green + merge → main keeps the
+   repo state matching what's deployed.
 
-**Why the manual revert + git revert combo:** the manual deploy is
-the fast operational lever (production traffic recovers in minutes).
+**Why the SSH-checkout + git revert combo:** the SSH checkout is
+the fast operational lever (production traffic recovers in seconds).
 The git revert keeps the repo honest — main always reflects
-production. Skipping the git revert leaves a "phantom" commit
-appearing to be live in main but not actually serving traffic, and
-the next merge to main re-deploys the bad code.
+production. Skipping the git revert leaves the droplet on a detached
+HEAD pointing at an old SHA, and the next `./scripts/deploy.sh`
+fast-forwards back to the bad code.
+
+**Important:** `git checkout <sha>` on the droplet leaves git in
+detached-HEAD state. The next deploy.sh `git pull --ff-only` will
+fail because there's no upstream branch. The git revert + merge to
+main is what fixes this; once main has the revert, `git checkout main`
+on the droplet plus a normal deploy.sh resumes the standard flow.
 
 ---
 
@@ -64,9 +84,14 @@ This is the easy case.
 
 **Procedure:**
 
-1. Render dashboard → Shell → `python manage.py migrate <app> <prev>`.
-2. Manual-deploy back to the pre-migration commit (§1 procedure).
-3. Investigate root cause locally.
+1. SSH to the droplet, `cd /home/app/family-books`.
+2. Run the reverse migration inside the web container:
+   ```bash
+   docker compose -f docker-compose.prod.yml --env-file .env.production \
+     run --rm --no-deps web python manage.py migrate <app> <prev>
+   ```
+3. SSH-checkout back to the pre-migration commit (§1 procedure).
+4. Investigate root cause locally.
 
 This works for: adding columns with defaults, adding indexes, adding
 nullable fields, adding tables. It does NOT work for: dropping
@@ -95,26 +120,35 @@ ops-action shape from decisions #22/#23 — no automation on `make
 migrate` alone; the operator runs the explicit composed command
 when the migration's risk profile warrants it.
 
-**Procedure (when the worst happens):**
+**Procedure (when the worst happens):** all commands run on the
+droplet via SSH, in `/home/app/family-books`.
 
-1. Identify the backup taken pre-migration:
+1. Identify the backup taken pre-migration (must have been from the
+   `prod/` prefix, NOT a drill in `dev-test/`):
    ```bash
-   python manage.py shell -c "from books.audit.models import AuditLog, AuditAction; \
-     print(AuditLog.objects.filter(action=AuditAction.BACKUP_CREATED, \
-     reason='pre-migration').order_by('-timestamp').first().entity_id)"
+   docker compose -f docker-compose.prod.yml --env-file .env.production \
+     exec -T web python manage.py shell -c \
+     "from books.audit.models import AuditLog, AuditAction; \
+      r = AuditLog.objects.filter(action=AuditAction.BACKUP_CREATED, \
+          reason='pre-migration').order_by('-timestamp').first(); \
+      print(r.entity_id if r else 'NO PRE-MIGRATION BACKUP FOUND')"
    ```
    The output is the B2 object key.
 
-2. Manual-deploy back to the pre-migration commit (§1 procedure).
+2. SSH-checkout back to the pre-migration commit (§1 procedure).
 
 3. Restore the backup over the live database. WARNING: this is
    destructive — it overwrites prod with the backup's state.
    Coordinate with users; expect user-visible downtime ~5 minutes.
    ```bash
-   python manage.py restore_db <backup-object-key> \
+   docker compose -f docker-compose.prod.yml --env-file .env.production \
+     run --rm --no-deps web python manage.py restore_db \
+       <backup-object-key> \
        --into "$DATABASE_URL" \
        --confirm-prod-restore
    ```
+   `$DATABASE_URL` is set inside the container by docker-compose
+   (constructed from POSTGRES_USER/PASSWORD/DB).
 
 4. Verify with a quick sanity check (open the trial balance, look
    for known values).
@@ -170,50 +204,74 @@ Without it, B2 backups are encrypted but undecryptable.
 
 ---
 
-## §5 — Render is down / migrate to a different host
+## §5 — Droplet is gone / migrate to a different host
 
-**When:** Render itself is in a sustained outage, OR Render's
-business changes in a way that requires migrating off. Off-site B2
-backups are the recovery story.
+**When:** the DigitalOcean droplet is in a sustained outage, has
+been compromised, or DO's pricing/policy changes drive a host
+migration. Off-site B2 backups are the recovery story.
 
 **Procedure:**
 
-1. Stand up a Postgres instance somewhere reachable
-   (AWS RDS, Hetzner, local Docker, etc.).
-2. Pick the latest backup from B2:
+1. Stand up a fresh host (new DO droplet, AWS EC2, Hetzner, etc.)
+   with Docker installed per `docs/DEPLOY.md` § 3.
+2. Clone the Family Books repo to `/home/app/family-books` on the
+   new host. Copy `.env.production.example` → `.env.production`
+   and fill in the values (LastPass + B2 console).
+3. Bring the stack up minus the data restore:
    ```bash
-   python manage.py shell -c "from books.core.backup.storage import build_default_storage; \
-     print(build_default_storage().list_objects()[-1].key)"
+   docker compose -f docker-compose.prod.yml --env-file .env.production \
+     up -d postgres
    ```
-3. Restore into the new Postgres:
+   Wait for healthcheck.
+4. Pick the latest production backup from B2 (NOT a drill artifact
+   — must be from the `prod/` prefix):
    ```bash
-   python manage.py restore_db <backup-object-key> \
-       --into "postgres://user:pw@new-host:5432/family_books"
+   docker compose -f docker-compose.prod.yml --env-file .env.production \
+     run --rm --no-deps web python manage.py shell -c \
+     "from books.core.backup.storage import build_default_storage; \
+      print(build_default_storage().list_objects()[-1].key)"
    ```
-4. Point the application at the new Postgres (env var swap).
-5. Verify trial balance ties out.
+5. Restore into the new Postgres:
+   ```bash
+   docker compose -f docker-compose.prod.yml --env-file .env.production \
+     run --rm --no-deps web python manage.py restore_db \
+       <backup-object-key> \
+       --into "$DATABASE_URL" \
+       --confirm-prod-restore
+   ```
+6. Bring the rest of the stack up:
+   ```bash
+   docker compose -f docker-compose.prod.yml --env-file .env.production \
+     up -d
+   ```
+7. Update DNS A record `books.markrowecontest.com` → new host IP.
+8. Run certbot on the new host (DEPLOY.md § 6).
+9. Verify trial balance ties out.
 
-The drill (§drill log below) exercises the steps minus the new-host
-Postgres provisioning. New-host provisioning is a Stage 2+ runbook
-addition if/when migration becomes a real concern.
+The drill (§drill log below) exercises steps 4–6 against a local
+Postgres on the operator's laptop, minus the new-host provisioning.
+New-host provisioning is real-cost work; the drill proves the
+B2-restore-into-fresh-postgres part works.
 
 ---
 
 ## §6 — Routine backup quietly stopped
 
-**When:** the nightly Cron Job stopped firing or started failing
-silently. Render's UI shows successful runs but no
-`BACKUP_CREATED` audit row appears in the application's audit log.
+**When:** the nightly cron job stopped firing or started failing
+silently. No `BACKUP_CREATED` audit row appears in the application's
+audit log.
 
 **Detection:** the nightly cron writes a `BACKUP_CREATED` row.
 A simple query catches gaps:
 
 ```bash
-python manage.py shell -c "from books.audit.models import AuditLog, AuditAction; \
-  from datetime import timedelta; from django.utils import timezone; \
-  yday = timezone.now() - timedelta(days=1); \
-  print('OK' if AuditLog.objects.filter(action=AuditAction.BACKUP_CREATED, \
-    timestamp__gte=yday).exists() else 'MISSING')"
+docker compose -f docker-compose.prod.yml --env-file .env.production \
+  exec -T web python manage.py shell -c \
+  "from books.audit.models import AuditLog, AuditAction; \
+   from datetime import timedelta; from django.utils import timezone; \
+   yday = timezone.now() - timedelta(days=1); \
+   print('OK' if AuditLog.objects.filter(action=AuditAction.BACKUP_CREATED, \
+     timestamp__gte=yday).exists() else 'MISSING')"
 ```
 
 A Group I polish item is to wire this into a monitoring alert
@@ -222,20 +280,48 @@ the quarterly drill cadence.
 
 **Procedure when MISSING:**
 
-1. Check Render Cron Job dashboard — failed runs visible there.
-2. Look at the failed run's logs. Common causes: B2 credentials
-   expired; AGE_RECIPIENT changed; pg_dump can't reach the DB
-   (network policy change).
-3. Fix root cause; trigger a manual run via Render dashboard.
-4. Confirm `BACKUP_CREATED` audit row appears.
+1. Check the cron log on the droplet:
+   ```bash
+   tail -50 /var/log/family-books-backup.log
+   ```
+   Look for the most recent START / DONE pair, or an error message.
+2. Check that the cron entry is still installed:
+   ```bash
+   crontab -l | grep family-books
+   ```
+3. Common causes: B2 credentials expired; AGE_RECIPIENT changed;
+   pg_dump can't reach the DB (DNS / network change); docker daemon
+   died; disk full.
+4. Fix root cause; trigger a manual run via the same script:
+   ```bash
+   /home/app/family-books/scripts/cron-backup.sh
+   ```
+5. Confirm `BACKUP_CREATED` audit row appears.
 
 ---
 
 ## §drill log — recorded executions
 
-The H.3 drill (`./manage.py drill_rollback --use-b2`) is the binding
-production-readiness check. Quarterly cadence (Mark's calendar
-reminder).
+The H.3 drill (`./manage.py drill_rollback --use-b2 --prefix dev-test/`)
+is the binding production-readiness check. Quarterly cadence
+(Mark's calendar reminder).
+
+**Prefix split (H.5x decision).** Drills always upload to and read
+from the `dev-test/` prefix in B2. Production backups (`prod/`) are
+never touched by drill runs. This keeps:
+
+- the `prod/` retention horizon (30 + 12 + 7) clean — drill
+  artifacts don't push real backups out of the keep set;
+- post-mortem queries unambiguous — anything under `prod/` is real
+  history; anything under `dev-test/` is operator-initiated test
+  traffic;
+- the drill itself honest — it still exercises a real round-trip
+  through B2 rather than an in-memory mock, just into a sandboxed
+  prefix.
+
+The `--prefix` flag is enforced at the `backup_db` layer, so
+`drill_rollback` cannot accidentally write to `prod/` even if the
+operator's `.env` points there.
 
 Reference values for the spot-check assertion (refinement #3):
 - **Account number:** `1-0179` (BOA - Savings).

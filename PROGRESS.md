@@ -412,14 +412,18 @@ gates are:
   `{% comment %}`, raw `{% if`, raw `{% for`, etc.) appear in any
   response body. One test, broad coverage.
 - **Group H** — backups + restore + rollback drill + WeasyPrint
-  startup check + render.yaml validation.
+  startup check + production deploy on DigitalOcean (Docker).
   - `books/core/backup/{retention,storage}.py` — pure-Python retention
     policy (30d + 12mo + 7y per ADR-001) and B2 client wrapper.
+    `build_default_storage(prefix_override=...)` lets callers
+    override `B2_PREFIX` without mutating env state.
   - `backup_db` / `restore_db` / `drill_rollback` management commands.
     Pipeline: pg_dump → age encrypt → B2 upload → retention prune →
     audit row. Restore: B2 download → age decrypt → pg_restore.
     Drill: backup → restore-into-scratch → 7-point verification
     (counts × 5 + system-account presence + BOA spot-check value).
+    `backup_db --prefix dev-test/` is the drill carve-out so drill
+    artifacts never co-mingle with production backup history.
   - 4 new AuditAction members: BACKUP_CREATED, BACKUP_RESTORED,
     BACKUP_DRILL_PASSED, BACKUP_DRILL_FAILED. Audit migration 0004
     extends the choice list. Drift test extends to 19 members.
@@ -427,29 +431,55 @@ gates are:
     `books/web/apps.py` ready() hook. CI workflow inserts
     `make check-deploy` between `make migrate` and the dry-run, so
     GTK-missing on the runner fails the build.
-  - `render.yaml` extended: `age` added to apt-install line; new
-    Cron Job service `family-books-nightly-backup` runs `backup_db
-    --reason scheduled` at 03:00 UTC daily; `check --deploy --fail-
-    level WARNING` added to web service build command.
-  - `Makefile` adds `make backup-then-migrate` — pre-migration
-    discipline target (deliberate-ops-action shape per #22, #23).
-    NOT automatic on `make migrate`.
-  - `docs/ROLLBACK.md` (new) — full runbook: bad-deploy via Render
-    manual-deploy, reversible vs. irreversible migration rollback,
-    LastPass age-key recovery for the dead-laptop case, Render-down
-    scenario, missed-backup detection. Drill-log section for
-    recording quarterly drill executions.
-  - **Sub-commits (6 to date):**
+  - **Production stack: DigitalOcean droplet + Docker Compose.**
+    `Dockerfile` (multi-stage Python 3.12-slim, non-root django uid
+    1001, gunicorn entrypoint, apt-installs Pango/Cairo/age/
+    postgresql-client/tini at the runner stage),
+    `docker-compose.prod.yml` (postgres:16-alpine + web + nginx with
+    pgdata + certbot-webroot named volumes, healthchecks, bridge
+    network), `deploy/nginx.conf` (HTTPS on
+    `books.markrowecontest.com`, ACME challenge, security headers).
+  - `scripts/deploy.sh` — pull → build → up postgres → migrate →
+    `up --no-deps web` → `nginx -s reload`. SKIP_PULL / SKIP_MIGRATE
+    escape hatches.
+  - `scripts/cron-backup.sh` — host-crontab wrapper that invokes
+    `backup_db --reason scheduled` inside the web container.
+    Logging to `/var/log/family-books-backup.log` documented in
+    DEPLOY.md.
+  - `.env.production.example` — committed template; `.env.production`
+    is gitignored. Documents prod/ vs dev-test/ B2 prefix split.
+  - `docs/DEPLOY.md` (new) — 14-section first-time droplet runbook
+    (DNS → Docker → ufw → certbot → up → migrate → bootstrap_owner
+    → seed_default_coa → cron entry → deploy.sh).
+  - `Makefile` adds `make backup-then-migrate` (pre-migration
+    discipline target) and `make image-build` / `make image-shell`
+    (local image debug).
+  - `docs/ROLLBACK.md` updated end-to-end: bad-deploy via SSH +
+    `git checkout` + `SKIP_PULL=1 ./scripts/deploy.sh`; reversible
+    + irreversible migration rollback via `docker compose run`;
+    LastPass age-key recovery for the dead-laptop case;
+    "droplet is gone / migrate to a different host"; missed-backup
+    detection via `tail /var/log/family-books-backup.log` +
+    `crontab -l`. Drill-log section names the prefix split
+    explicitly.
+  - **Platform pivot logged at `docs/historical/render.yaml.unused`.**
+    `docs/CI.md` § "Production deploy" rewritten to document the
+    DO/Docker chain (manual `scripts/deploy.sh` invocation, manual
+    rollback via `git checkout`, no auto-deploy).
+  - **Sub-commits (8):**
     - `0ce9c05` H.1 — backup_db + retention + storage + audit migration
     - `0d8127e` H.2 — restore_db + safety flags
     - `e7e0429` H.3 — drill_rollback + broadened verification
     - `6f71afc` H.4 — WeasyPrint Django check + CI gating
-    - `5256444` H.5a — render.yaml updates (initial; UNVERIFIED:1
-      pending Render deploy validation)
-    - [H.6 hash] — docs/ROLLBACK.md + summary (this commit)
-  - **H.5 sub-series continues** if/when the actual Render deploy
-    surfaces schema corrections. Each correction lands as a discrete
-    commit citing the Render error message it fixes.
+    - `50b0757` G.2-cleanup + render.yaml → `docs/historical/`
+    - `47bf006` H.5a — Dockerfile + .dockerignore
+    - `81a3c0a` H.5b — docker-compose.prod.yml
+    - `386d8d5` H.5c — deploy/nginx.conf
+    - `018a1b5` H.5d — docs/DEPLOY.md
+    - `ff408d5` H.5e + H.5h — scripts/deploy.sh + Makefile image targets
+    - `25f8880` H.5f + H.5g + H.5x — cron-backup.sh + env example +
+      `--prefix` plumbing for prod/ vs dev-test/ split
+    - [H.6 hash] — docs/ROLLBACK.md + PROGRESS.md (this commit)
 
 ### Design decisions made during Group H
 
@@ -463,13 +493,13 @@ gates are:
 2. **age binary, not Python age library.** The Debian stable `age`
    package is the standard; pyrage on PyPI is less mature. Backup/
    restore commands shell out to `age` via subprocess, similar to
-   how they shell out to pg_dump / pg_restore. apt-install in
-   render.yaml carries the binary into the production image.
+   how they shell out to pg_dump / pg_restore. The runner-stage
+   Dockerfile carries the binary into the production image.
 3. **Refuse-not-default on `restore_db --into`.** No default to
    `$DATABASE_URL` (silent prod overwrite would be too easy). The
-   --confirm-prod-restore double-flag is required when --into
+   `--confirm-prod-restore` double-flag is required when `--into`
    resolves to the same (host, port, database) tuple as
-   $DATABASE_URL — same shape as `reset_coa --confirm-destroy`.
+   `$DATABASE_URL` — same shape as `reset_coa --confirm-destroy`.
 4. **CI doesn't run the real drill.** No B2 credentials, no
    scratch Postgres in the GitHub Actions runner. CI tests the
    orchestration code paths via mocked B2 + mocked psycopg cursor;
@@ -485,17 +515,38 @@ gates are:
    applied here as encoded count vs. data integrity.
 6. **WeasyPrint check is a Warning, not an Error, locally.** Local
    `make check` doesn't block on missing GTK (Windows dev
-   reality). CI `make check-deploy` (`--fail-level WARNING`) and
-   render.yaml's build command (`check --deploy --fail-level
-   WARNING`) convert it to a build-failing Error. The runtime 503
-   fallback in F.5's PDF view becomes "should never fire" rather
-   than just "shouldn't fire."
-7. **render.yaml is UNVERIFIED until the actual Render deploy.**
-   pythonVersion / postgresMajorVersion / cron schedule keys are
-   best-known per Render docs. Group H's H.5 sub-series captures
-   any corrections as discrete commits citing specific error
-   messages. Once the deploy succeeds, a final commit pins the
-   verified-on-date as the constraint baseline.
+   reality). CI `make check-deploy` (`--fail-level WARNING`)
+   converts it to a build-failing Error. The runner-stage
+   Dockerfile apt-installs Pango/Cairo so the production image is
+   GTK-complete; the F.5 runtime 503 fallback becomes "should
+   never fire" rather than just "shouldn't fire."
+7. **Pivot from Render to DigitalOcean droplet (Docker).** Made
+   between H.4 and H.5. Render's managed-platform shape (auto-
+   deploy on merge, dashboard-driven cron, hosted Postgres) was
+   the original Group H plan; the pivot keeps Postgres + Django +
+   nginx as Compose services on a single droplet. Rationale:
+   mirrors the rowe-contest project's pattern (zero new ops
+   learning); operator controls deploy timing (no surprise
+   deploys); cron lives on the host, not a managed service. The
+   `render.yaml` artifact is preserved at
+   `docs/historical/render.yaml.unused` for archaeology.
+8. **Manual deploy, not auto-deploy.** v1 is single-user; "deploy
+   when ready" beats "deploy on every merge." `scripts/deploy.sh`
+   is the single command; the operator picks the moment. Branch
+   protection still gates merge to main. Auto-deploy is later
+   polish if cadence demands it.
+9. **Prefix split: `prod/` vs `dev-test/` (H.5x).** Production
+   backups land in `B2_PREFIX=prod/`. Drill artifacts use
+   `dev-test/` via `backup_db --prefix dev-test/` (passed by
+   `drill_rollback`). Keeps the production retention horizon
+   clean, makes post-mortem queries unambiguous, and prevents a
+   misconfigured drill from pruning real backup history.
+10. **`build_default_storage(prefix_override=...)` instead of
+    env-mutation.** The `--prefix` flag overrides `B2_PREFIX` at
+    the storage-construction layer using `dataclasses.replace`,
+    not by mutating `os.environ`. Mutating env state from a
+    management command is the kind of side effect that surfaces
+    later as a parallel-test flake.
 
 ### Class-of-bug catalog (running list, after Group H)
 
@@ -524,11 +575,18 @@ guarded against by the broadened drill verification (#5 above).
   Today's detection is the manual query in `docs/ROLLBACK.md` § 6.
   Group I wires it into an alert (email or Slack) so a missed
   nightly backup pages the operator without manual checking.
-- **render.yaml schema corrections (H.5b through H.5N)** pending
-  the actual Render deploy. Each correction lands as a discrete
-  commit citing the specific error message. Once the deploy
-  succeeds, a final commit pins the verified-on-date in
-  render.yaml as the constraint baseline for future edits.
+- **First droplet deploy (operational, not code).** Five
+  remaining items, all on Mark's hand:
+  1. Provision the DigitalOcean droplet (DEPLOY.md § 3).
+  2. Point `books.markrowecontest.com` A record at the droplet IP.
+  3. Run `./scripts/deploy.sh` for the first time; iterate on any
+     deploy-time errors. Each correction lands as a discrete
+     commit citing the specific error.
+  4. Run `drill_rollback --use-b2 --prefix dev-test/` against the
+     droplet's database; record date, duration, source counts,
+     and spot-check value in `docs/ROLLBACK.md` § drill log.
+  5. Add the host crontab entry for `scripts/cron-backup.sh`
+     (DEPLOY.md § 12).
 - **H.3 drill execution recording** pending Mark's local drill
   run. `docs/ROLLBACK.md` § drill log has the placeholder section
   ready to fill in (date, duration, source counts, spot-check
