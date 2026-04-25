@@ -55,6 +55,42 @@ def test_negative_display_order_sorts_above_default():
     assert ordered == [a_sys.pk, a_user.pk]
 
 
+# Property #3 from the breakdown — ordering invariant under hypothesis.
+# `unique=True` on the integers strategy avoids ties (which would let
+# `name` decide and complicate the assertion). Capping `max_examples` keeps
+# CI runtime predictable; this is the cheap kind of hypothesis test.
+import hypothesis  # noqa: E402
+from hypothesis import strategies as st  # noqa: E402
+
+
+@hypothesis.given(
+    sys_order=st.integers(max_value=-1),
+    user_order=st.integers(min_value=0, max_value=1_000_000),
+)
+@hypothesis.settings(
+    max_examples=25,
+    deadline=None,
+    suppress_health_check=[hypothesis.HealthCheck.function_scoped_fixture],
+)
+@pytest.mark.django_db
+def test_property_negative_always_sorts_above_non_negative(
+    sys_order: int, user_order: int
+):
+    """For any (negative, non-negative) display_order pair, the negative
+    row sorts first under the default queryset ordering."""
+    Account.objects.all().delete()
+    sys_a = AccountFactory(
+        account_number="S-PROP", name="System", display_order=sys_order
+    )
+    user_a = AccountFactory(
+        account_number="U-PROP", name="User", display_order=user_order
+    )
+    ordered = list(Account.objects.values_list("pk", flat=True))
+    assert ordered == [sys_a.pk, user_a.pk], (
+        f"sys_order={sys_order} user_order={user_order} did not sort sys first"
+    )
+
+
 # --- Index drift ---------------------------------------------------------
 
 
