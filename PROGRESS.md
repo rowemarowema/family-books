@@ -122,6 +122,80 @@ complete, what is next, and any open questions. See
    negatively (draft→posted succeeds) to prevent future regressions
    that over-block.
 
+- **Group E** — COA bootstrap (loader, reset, system-account protections,
+  audit-action enum, format drift detection).
+  - `fixtures/default_coa.json` — Mark's full 640-account QuickBooks
+    export + 3 Equity system accounts (Owner's Equity / Opening Balance
+    Equity / Retained Earnings, `display_order` -300/-200/-100 so they
+    sort to the top of the Equity grouping).
+  - `Account.display_order` IntegerField (default 0, indexed) +
+    `Account.is_system` BooleanField (default False, indexed).
+    `Meta.ordering` flipped to `(display_order, name)`. Composite
+    `(display_order, name)` index covers the default sort. Migration
+    `accounting/0003_account_display_order`.
+  - `Account.clean()` extended with three system-account rules
+    (is_system requires Equity; is_system immutable post-create;
+    is_active=False rejected on system rows). pre_save signal
+    inherits the checks for raw create()/bulk paths.
+  - `AccountAdmin` exposes `display_order` editable and `is_system`
+    readonly; `is_active` becomes readonly when editing a system row.
+  - `books.audit.AuditAction` TextChoices enum + migration
+    `audit/0002_auditlog_action_choices`. All Group C/D string-literal
+    `action=` values migrated to enum members. Drift test asserts every
+    distinct `AuditLog.action` value in the DB is a member.
+  - `seed_default_coa` management command — JSON loader, two-pass
+    insert in `transaction.atomic()`, refuses if any non-system
+    Account exists, in-memory cycle/depth/unknown-parent validator,
+    `--dry-run` flag, audit rows on success and refusal.
+  - `reset_coa` management command — `--confirm-destroy` required,
+    refuses on any posted JournalEntry or any JournalLine, deletes
+    only `is_system=False` rows (DELETE WHERE; not TRUNCATE),
+    preserves system accounts.
+  - Tests: 12 format-drift, 18 loader, 10 reset, 9 system-account
+    protections, 4 admin smoke, 4 audit-action drift, +1 hypothesis
+    property test. Total ~58 new tests on top of Group D's 77.
+  - Commits: `d4b9288`, `2ce3bd4`, `54ea46a`, `0f93237`, [commit 5 hash].
+
+### Design decisions made during Group E
+
+1. **Loader is JSON, not YAML.** Mark's QuickBooks export ships as JSON
+   and is the source of truth (Batch #4 / ADR-004). Loader does not
+   parse `full_path`; `parent_account_number` is the sole hierarchy key.
+2. **Refuse-not-upsert idempotency.** Re-running `seed_default_coa`
+   while user accounts exist refuses with a clean error pointing at
+   `reset_coa`. Upsert was rejected as a side-door around the
+   coexistence rules + Group D immutability.
+3. **System accounts preserved across reset.** `reset_coa` deletes
+   `is_system=False` only; the 3 Equity system accounts persist so that
+   the post-reset state isn't a transient inconsistent COA. Re-running
+   `seed_default_coa` skips system rows already in the DB by
+   `account_number` lookup.
+4. **System-account preservation also gates is_system mutability.**
+   `is_system` is set on INSERT and immutable thereafter — the only way
+   to "un-mark" a system account is to reset_coa + re-seed. Mark
+   confirmed this matches the deliberate-ops-action shape from earlier
+   decisions (#22, #23).
+5. **`AuditAction` enum migration is foundational, not cosmetic.** Group
+   C/D shipped with string-literal action values; Mark called for the
+   enum migration on the Group E surface so the four new COA actions
+   join an already-controlled vocab. Doing it later would have been
+   more painful (more rows to backfill, more call sites to touch).
+6. **Negative `display_order` is the convention for "sort to top."**
+   Default user accounts use 0; system accounts use -100/-200/-300.
+   Initial proposal (1/2/3) would have placed system accounts after
+   user accounts; switched to negatives during the breakdown review.
+
+### reset_coa behavior table
+
+| Condition | Outcome |
+|---|---|
+| Posted `JournalEntry` exists | Refuse + write `COA_RESET_REFUSED` audit row |
+| Any `JournalLine` exists (even draft) | Refuse + write `COA_RESET_REFUSED` audit row |
+| `--confirm-destroy` empty / missing | `CommandError` (no audit row) |
+| Otherwise | `DELETE FROM account WHERE is_system = FALSE` (ORM-emitted) |
+| System accounts | Always preserved; `is_system=True` rows untouched |
+| Audit row | `COA_RESET` with `after.deleted_user_account_count = N` |
+
 ### Deferred
 
 - **2FA grace-window warning (banner + T+23h email)** explicitly deferred
@@ -131,6 +205,11 @@ complete, what is next, and any open questions. See
   `two_factor_enforcement_auto_re_enabled` AuditLog row, plus the CLI
   output the operator saw at T=0 when they ran
   `disable_2fa_enforcement`.
+- **Polished `display_order` admin UI** (drag-and-drop reorder, bulk
+  multi-select reorder) deferred to **Group I**. Stage 1 ships
+  `display_order` as a plain editable IntegerField on the admin change
+  form; refinement #3 in the Group E breakdown — basic editability
+  cannot be gated behind the polished UI.
 
 ### Time / date policy (load-bearing for Group D onward)
 
@@ -143,7 +222,22 @@ and audit `timestamp` fields are tz-aware UTC. See
 
 - None blocking.
 
-### Verification to run before approving Group D
+### Verification to run before approving Group E
+
+```bash
+make check           # <<< always run first (standing rule)
+make migrate         # accounting.0003 + audit.0002 apply cleanly on top of D's state
+make test            # expect ~135 green; books.accounting.* coverage ≥ 80%
+
+# Optional smoke of the new commands:
+python manage.py seed_default_coa --dry-run    # validates 643 rows, creates none
+python manage.py seed_default_coa              # 3 + 640 created, audit row written
+python manage.py seed_default_coa              # refuses + audit row
+python manage.py reset_coa --confirm-destroy "approval drill"
+python manage.py seed_default_coa              # 640 user re-created; 3 system preserved
+```
+
+### Verification to run before approving Group D (historical)
 
 ```bash
 make check           # <<< always run first (standing rule)
@@ -200,7 +294,17 @@ checklist is the bridge.
 
 ### Stage 1 acceptance-checklist items reachable now
 
-- #12 Authentication + session timeout + audit log: **partial** — all
-  plumbing in place; viewer UI lands in Stage 9.
-- Section 11 items requiring financial data (trial balance, backup
-  drill, etc.) still blocked on Groups F / H.
+- **#1 COA bootstrap (Group E): passing.** `seed_default_coa` /
+  `reset_coa` / `seed_default_coa` round-trip exercised in
+  `tests/integration/test_reset_coa.py::test_reset_then_seed_round_trips`
+  and documented in `docs/ACCEPTANCE.md`. Last-verified date pending
+  Mark's local run.
+- **#12 Authentication + session timeout + audit log: partial** — all
+  plumbing in place; viewer UI lands in Stage 9. AuditLog vocabulary now
+  controlled by `AuditAction` TextChoices.
+- Trial-balance tie-out (Group D): **passing** at the engine level via
+  the 75-entry hypothesis property test in
+  `tests/integration/test_trial_balance_tie_out.py`.
+- Section 11 items requiring later-stage features (backup drill, period
+  close, lot import, wash-sale, viewer UI) still blocked on Groups F /
+  H / Stages 2+.
