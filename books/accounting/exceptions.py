@@ -43,3 +43,20 @@ class CannotReverseAReversal(AccountingError):
     """An attempt was made to reverse an entry that is itself a reversal.
     Reversal chains are not allowed; to undo a reversal, post a corrective
     new entry instead."""
+
+
+class OpeningBalanceError(AccountingError):
+    """An attempt to set an opening balance was rejected.
+
+    Reasons (the message text disambiguates):
+      - account.is_system: the 3 system equity accounts hold the offset
+        side, not user-entered balances.
+      - account.type in (Revenue, Expense): only carry-forward types
+        (Asset / Liability / Equity) get opening balances.
+      - amount == 0: nothing to post.
+      - duplicate (account, as_of): an opening JE already exists for
+        this pair; reverse it before re-posting.
+      - period closed: the as_of date falls inside a closed period.
+        (Stage 2 wires the activation site; today, no FiscalPeriod
+        model exists and the check trivially passes.)
+    """

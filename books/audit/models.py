@@ -57,6 +57,13 @@ class AuditAction(models.TextChoices):
     COA_RESET = "coa_reset", "COA reset"
     COA_RESET_REFUSED = "coa_reset_refused", "COA reset refused"
 
+    # --- Opening balances / Group F ---
+    OPENING_BALANCE_SET = "opening_balance_set", "Opening balance set"
+    OPENING_BALANCE_REFUSED = (
+        "opening_balance_refused",
+        "Opening balance refused",
+    )
+
 
 class AuditLog(models.Model):
     entity_type = models.CharField(max_length=64, db_index=True)

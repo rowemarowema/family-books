@@ -70,6 +70,9 @@ def test_audit_action_covers_all_known_origins():
         "coa_seed_refused",
         "coa_reset",
         "coa_reset_refused",
+        # Opening balances / Group F
+        "opening_balance_set",
+        "opening_balance_refused",
     }
     assert set(AuditAction.values) == expected
 
