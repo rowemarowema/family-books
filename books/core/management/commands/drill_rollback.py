@@ -144,7 +144,14 @@ class Command(BaseCommand):
         from books.audit.models import AuditAction, AuditLog
 
         if use_b2:
-            call_command("backup_db", "--reason", "drill")
+            # Drills use the dev-test/ prefix so drill artifacts never
+            # co-mingle with production backup history. Per Mark's H.5x
+            # decision; documented in docs/ROLLBACK.md § drill log.
+            call_command(
+                "backup_db",
+                "--reason", "drill",
+                "--prefix", "dev-test/",
+            )
             latest = (
                 AuditLog.objects
                 .filter(action=AuditAction.BACKUP_CREATED)

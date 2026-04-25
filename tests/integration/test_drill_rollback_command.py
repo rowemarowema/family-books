@@ -234,6 +234,35 @@ def test_full_drill_passes_when_counts_match(
     assert audit.after_value["spot_check_value"] == "8500.00"
 
 
+@pytest.mark.django_db
+def test_drill_invokes_backup_db_with_dev_test_prefix(
+    drill_env, fake_subprocess, fake_b2, fake_target_db,
+):
+    """The drill MUST pass --prefix dev-test/ to backup_db so drill
+    artifacts never co-mingle with production backup history. Refines
+    H.5x: the BACKUP_CREATED audit row written during the drill
+    records prefix=dev-test/ via the factory call args."""
+    factory_calls = []
+    real_factory = None  # noqa: F841
+
+    def _capture_factory(*args, **kwargs):
+        factory_calls.append((args, kwargs))
+        return fake_b2
+
+    with patch(
+        "books.core.backup.storage.build_default_storage",
+        side_effect=_capture_factory,
+    ):
+        call_command("drill_rollback", "--use-b2")
+
+    # backup_db inside the drill should have invoked
+    # build_default_storage(prefix_override="dev-test/") at least once.
+    assert any(
+        kw.get("prefix_override") == "dev-test/"
+        for _, kw in factory_calls
+    ), f"factory calls: {factory_calls}"
+
+
 def _patched_target_db(snapshot, *, override=None):
     """Return a context manager that patches psycopg.connect with a
     cursor returning `snapshot` values for the standard queries.

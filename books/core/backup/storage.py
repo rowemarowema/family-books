@@ -147,6 +147,18 @@ def parse_object_key(key: str):
         return None
 
 
-def build_default_storage() -> B2Storage:
-    """Production entry point — resolves config from env."""
-    return B2Storage(B2Config.from_env())
+def build_default_storage(prefix_override: str | None = None) -> B2Storage:
+    """Production entry point — resolves config from env.
+
+    `prefix_override` lets callers (e.g., drill_rollback) target a
+    different B2 prefix than the one in B2_PREFIX env. Convention:
+    production cron uses the env-configured prefix (e.g., "prod/");
+    drills pass "dev-test/" so drill artifacts never co-mingle with
+    production backup history. See docs/ROLLBACK.md § drill log.
+    """
+    from dataclasses import replace
+
+    config = B2Config.from_env()
+    if prefix_override is not None:
+        config = replace(config, prefix=prefix_override)
+    return B2Storage(config)

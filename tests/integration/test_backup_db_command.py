@@ -83,6 +83,40 @@ def env_setup(monkeypatch):
 
 
 @pytest.mark.django_db
+def test_prefix_flag_overrides_b2_prefix_env(env_setup, fake_pg_dump):
+    """`--prefix dev-test/` invokes build_default_storage with
+    prefix_override="dev-test/". Used by drill_rollback to keep
+    drill artifacts out of the production backup-history prefix."""
+    storage = MagicMock()
+    storage.upload.return_value = 100
+    storage.list_objects.return_value = []
+    with patch(
+        "books.core.backup.storage.build_default_storage",
+        return_value=storage,
+    ) as factory:
+        call_command("backup_db", "--prefix", "dev-test/")
+
+    # The factory was called with the override.
+    factory.assert_called_once_with(prefix_override="dev-test/")
+
+
+@pytest.mark.django_db
+def test_no_prefix_flag_uses_env_default(env_setup, fake_pg_dump):
+    """Without --prefix, build_default_storage receives None and
+    falls back to whatever B2_PREFIX env says (the cron path)."""
+    storage = MagicMock()
+    storage.upload.return_value = 100
+    storage.list_objects.return_value = []
+    with patch(
+        "books.core.backup.storage.build_default_storage",
+        return_value=storage,
+    ) as factory:
+        call_command("backup_db")
+
+    factory.assert_called_once_with(prefix_override=None)
+
+
+@pytest.mark.django_db
 def test_backup_uploads_and_writes_audit(env_setup, fake_pg_dump, fake_storage):
     out = io.StringIO()
     call_command("backup_db", stdout=out)

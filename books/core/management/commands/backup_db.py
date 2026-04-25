@@ -56,6 +56,15 @@ class Command(BaseCommand):
             action="store_true",
             help="Run pg_dump + encrypt; skip B2 upload and retention.",
         )
+        parser.add_argument(
+            "--prefix",
+            default=None,
+            help=(
+                "Override B2_PREFIX env. drill_rollback passes "
+                "dev-test/ so drill artifacts never co-mingle with "
+                "production backup history. See docs/ROLLBACK.md."
+            ),
+        )
 
     def handle(self, *args: Any, **options: Any) -> None:
         from books.audit.models import AuditAction, AuditLog
@@ -67,6 +76,7 @@ class Command(BaseCommand):
 
         reason: str = options["reason"]
         dry_run: bool = options["dry_run"]
+        prefix_override: str | None = options.get("prefix")
         started = datetime.now(UTC)
 
         db_url = self._resolve_database_url()
@@ -92,7 +102,7 @@ class Command(BaseCommand):
                 )
                 return
 
-            storage = build_default_storage()
+            storage = build_default_storage(prefix_override=prefix_override)
             storage.upload(encrypted_path, object_key)
 
             # Retention prune. Failures here are logged but don't abort
