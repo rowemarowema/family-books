@@ -229,6 +229,157 @@ complete, what is next, and any open questions. See
 | System accounts | Always preserved; `is_system=True` rows untouched |
 | Audit row | `COA_RESET` with `after.deleted_user_account_count = N` |
 
+- **Group F** — opening balances + trial balance UI (engine, HTML,
+  CSV/XLSX/PDF exports).
+  - `books/accounting/opening_balances.py` — `set_opening_balance()`
+    posts a balanced 2-line JE per (account, as_of) with offset to
+    system Opening Balance Equity (3-9100). Refusal contract on system
+    account / type / zero amount / duplicate. Reverse + re-post
+    round-trip via `reverse_opening_balance()`. ADR-005 documents the
+    JE shape and the duplicate-check filter.
+  - Period-close stub `_check_period_open(as_of)` is a no-op today
+    with `# TODO(stage-2)` marker; FiscalPeriod model lands in Stage 2.
+    ADR-006 documents the deferred contract.
+  - `set_opening_balance` management command — single-account or
+    `--csv` bulk modes. CSV columns:
+    `account_number,account_path,amount,as_of`. account_number wins
+    when both ID columns present; account_path resolves by walking
+    parent chain in memory. Refuse-not-partial semantics
+    (`transaction.atomic()` over the whole batch).
+  - `fixtures/sample_opening_balances.csv` — 6 rows, 3 distinct
+    `as_of` dates, 3 Asset / 3 Liability, leaf accounts only, anchored
+    to verified `default_coa.json` paths.
+  - `books/accounting/reports/trial_balance.py` —
+    `compute_trial_balance(as_of, prior_as_of=None, include_zero=False,
+    types=None)` returns a hierarchical TrialBalance dataclass.
+    Single ORM aggregate per as_of, in-memory tree assembly, sort
+    contract `(TYPE_RANK, display_order, name)`, activity-aware
+    visibility default.
+  - `books/web/views/reports.py` + `books/core/auth.py` —
+    `@owner_only_with_2fa` decorator (mirrors admin gate; 403 not
+    302), `trial_balance_view()` with format dispatch
+    (`html|csv|xlsx|pdf`). Owner-only, 2FA-gated when SystemFlag
+    enforcement is on. Named-param 400 messages for bad query
+    strings.
+  - `templates/base.html` (5-line shell) + `templates/reports/
+    trial_balance.html` + `_amount_cell.html` partial. Bootstrap 5
+    via CDN. `data-cell` / `data-value` attributes drive the cell-
+    level tie-out test.
+  - Exporters under `books/accounting/reports/exporters/` — CSV
+    (RFC-4180 UTF-8), XLSX (openpyxl, accounting number_format),
+    PDF (WeasyPrint, lazy import + 503 fallback). Same engine call,
+    three rendering surfaces. Cell-level round-trip property test
+    proves HTML/CSV/XLSX agree on every cell vs the engine.
+  - `docs/SETUP.md` — Windows GTK install path; Render
+    `apt-get install libpango-1.0-0 libpangoft2-1.0-0
+    libgdk-pixbuf2.0-0` build command (Mark's strict posture: PDF
+    is a runtime feature, GTK installed at build).
+  - **Sub-commits (6):**
+    - `4893c34` F.1 service + audit migration + 24 tests
+    - `36fc22d` F.2 CLI + sample CSV + 16 tests
+    - `dded24e` F.3 engine + 19 tests (incl. 5 parametrize)
+    - `36c1766` F.4 HTML view + decorator + 21 tests
+    - `192aaee` F.5 exporters + view dispatch + 15 tests
+    - `7ba09af` F.5-fix template comment leak + regression test
+  - **Plus two F.1 follow-ups in the same group:** `9b63303`
+    (duplicate-check filter fix for reversal-as-self) and `394bc88`
+    (assertion-shape fix in the regression test). Both became
+    canonical examples in the class-of-bug catalog.
+
+### Design decisions made during Group F
+
+1. **Service is the only public path.** `set_opening_balance()` is the
+   sole opening-balance API. The CLI is a thin shell; the HTML form
+   in Stage 2 will be the second consumer. No code path reaches
+   `JournalEntry` / `JournalLine` directly; everything goes through
+   `post_entry()` (Group D) for posting + immutability + audit.
+2. **Reference number convention `OB:<account>:<as_of>`** is the basis
+   for the duplicate-check filter and for the F.5 export
+   `Content-Disposition` filename. Deterministic per (account, as_of).
+3. **Duplicate-check filter has TWO conditions, not one.**
+   `reversed_by__isnull=True AND reversing_entry__isnull=True`. The
+   first excludes originals that have been reversed; the second
+   excludes the reversal itself (which inherits the original's
+   `reference_number` per Group D `reverse_entry()`). The F.1 bug-pair
+   — too-narrow filter shipped paired with too-narrow assertion —
+   produced row #3 in the class-of-bug catalog.
+4. **Activity-aware default visibility** in the trial balance:
+   include if balance != 0 OR posted activity in the as-of window
+   (regardless of `is_active`). Hide only zero-balance + zero-activity.
+   `?include_zero=1` shows everything. Matches accountant
+   expectations for inactive-but-historically-significant accounts.
+5. **Sort contract `(TYPE_RANK, display_order, name)`** is the engine's
+   responsibility. Templates and exporters render in the order the
+   engine returns. The sort is the basis for both the HTML render
+   order and the CSV/XLSX row order — single source of truth.
+6. **`@owner_only_with_2fa` decorator returns 403, not 302-to-login.**
+   Report URLs aren't part of the auth flow; an unauthenticated
+   request is a misuse, not a redirect-worthy event. The login URL
+   is `/account/login/` via two_factor's LoginView.
+7. **CSV/XLSX drop type subheader rows; HTML keeps them.** Downstream
+   consumers (pandas, Excel formulas) need clean tables; the `type`
+   column does the grouping. HTML keeps the subheaders for visual
+   readability. Q2 refinement during the F.5 breakdown review.
+8. **`data-value="<raw decimal>"` is the test contract surface;
+   displayed text is for humans.** The cell-level tie-out test reads
+   `data-value` directly — never parses the displayed text. This
+   means the "negatives in parens" display logic could change without
+   breaking the test, and conversely, the test catches any drift
+   between engine output and the canonical decimal regardless of how
+   it's displayed.
+9. **WeasyPrint runtime dep + lazy import + 503 fallback** (defense
+   in depth). Strict posture per Mark: PDF is required in production;
+   Render apt-installs Pango/Cairo system libs at build. The lazy
+   import + typed `PDFRendererUnavailable` exception is the soft
+   fallback for Windows local dev without GTK; in production it
+   should never fire. Group H gets a forward-pointer for a startup
+   check that fails fast at boot if GTK is missing.
+
+### Class-of-bug catalog (running list)
+
+Surfaced across Groups E and F. Documented in
+`memory/feedback_assertion_strength.md` for cross-session retention.
+Each pattern has a different fix shape; the catalog is what makes
+recognition automatic.
+
+| # | Pattern | Where surfaced | Fix shape |
+|---|---|---|---|
+| 1 | **Comment lied about fixture** | Group E depth-5-claiming-depth-4 | Strengthen fixture to match named claim; add boundary test |
+| 2 | **Fixture didn't exercise the path** | Group E reset_coa flat fixture | Add real-fixture-shape test; binding standing rule |
+| 3 | **Assertion targeted wrong population** | F.1 reverse-cycle `count()==2` | State-filtered counts + FK-shape assertions; same filter as production |
+| 4 | **Mis-aimed test (test correct, target wrong)** | F.5 cell test reading `<td>` while leak was in `<tr>` text nodes | Add a separate targeted test, don't broaden the original |
+
+Patterns 1–3: tests asserted the wrong thing. Pattern 4: test asserted
+the right thing but in the wrong DOM region. Different fixes — 1–3
+strengthen the original test; 4 adds a sibling test.
+
+### Standing rules (binding for the rest of Stage 1)
+
+After Group F, the standing pre-commit checklist + group-completion
+gates are:
+
+1. **Four-step pre-commit verification** — `make check && make migrate
+   && python manage.py makemigrations --dry-run && make test`. Each
+   step must be clean.
+2. **UNVERIFIED list = 0** with site-packages citations for every
+   third-party API call.
+3. **Defense-in-depth tables** for every major invariant in the
+   group breakdown.
+4. **Property-based tests** where invariants are universal (tie-out,
+   ordering, idempotency, etc.).
+5. **Constraint and index drift tests** (`pg_constraint` /
+   `pg_indexes` introspection) for any DB-level rule.
+6. **Real-fixture smoke** — binding before declaring any group done.
+   At least one test loads `fixtures/default_coa.json` and exercises
+   the group's main code path against it; manual browser smoke for
+   any HTTP-facing change.
+7. **Cross-service round-trip tests** for any service that interacts
+   with another service's contract (e.g., set_opening_balance →
+   post_entry → reverse_entry → re-post is exercised end-to-end).
+8. **Class-of-bug catalog updates** — when a regression reveals a
+   new pattern, add a row to
+   `memory/feedback_assertion_strength.md`.
+
 ### Deferred
 
 - **2FA grace-window warning (banner + T+23h email)** explicitly deferred
@@ -243,6 +394,29 @@ complete, what is next, and any open questions. See
   `display_order` as a plain editable IntegerField on the admin change
   form; refinement #3 in the Group E breakdown — basic editability
   cannot be gated behind the polished UI.
+- **Period-close gate activation** deferred to **Stage 2**. The
+  `_check_period_open(as_of)` stub in
+  `books/accounting/opening_balances.py` is a no-op today; Stage 2's
+  `FiscalPeriod` model + period-close API will replace the stub body
+  with the real query. Activation site is grep-findable via
+  `TODO(stage-2)`. ADR-006 documents the deferred contract.
+- **Handsontable grid for opening-balance entry** deferred to
+  **Stage 2** (per Q2 in the Group F breakdown). F.2 ships the CLI
+  + CSV-bulk path; the on-screen grid is the next polish.
+- **Generic template-meta-leak test** deferred to **Group I**. The
+  F.5 fix added a targeted regression
+  (`test_no_template_comment_leaks_in_rendered_body`) that scans the
+  trial-balance page for known-bad substrings. Group I will
+  generalize this to a single test that walks all named URLs, GETs
+  each as the owner, and asserts no template-syntax tokens (`{#`,
+  `{% comment %}`, raw `{% if`, raw `{% for`, etc.) appear in any
+  response body. One test, broad coverage.
+- **WeasyPrint deploy startup check** deferred to **Group H**. The
+  F.5 PDF exporter degrades gracefully (lazy import + typed
+  `PDFRendererUnavailable` → 503); Group H adds a startup check that
+  exercises `import weasyprint` at boot and fails fast if Render's
+  apt-install was silently skipped. Defense in depth on top of the
+  runtime fallback.
 
 ### Time / date policy (load-bearing for Group D onward)
 
@@ -255,7 +429,27 @@ and audit `timestamp` fields are tz-aware UTC. See
 
 - None blocking.
 
-### Verification to run before approving Group E
+### Verification to run before approving Group F
+
+```bash
+pip install -e .[dev]                        # picks up beautifulsoup4, pypdf
+make check                                   # standing rule, step 1
+make migrate                                 # accounting.0003 + audit.0002 + 0003
+python manage.py makemigrations --dry-run    # must say "No changes detected"
+make test                                    # 254 green + 2 PDF skips on Windows-no-GTK
+
+# Real-fixture browser smoke (binding):
+python manage.py bootstrap_owner --email mark@example.com
+python manage.py seed_default_coa
+python manage.py set_opening_balance --csv fixtures/sample_opening_balances.csv
+python manage.py runserver
+# Browser, all four formats from /reports/trial-balance/?as_of=2026-04-25
+# expect: HTML renders Bootstrap table, "Balanced" badge, $27,350 totals;
+# CSV/XLSX/PDF download as attachments with sensible filenames; cells
+# match HTML.
+```
+
+### Verification to run before approving Group E (historical)
 
 ```bash
 make check                                   # standing rule, step 1
@@ -359,8 +553,12 @@ checklist is the bridge.
 - **#1 COA bootstrap (Group E): passing.** `seed_default_coa` /
   `reset_coa` / `seed_default_coa` round-trip exercised in
   `tests/integration/test_reset_coa.py::test_reset_then_seed_round_trips`
-  and documented in `docs/ACCEPTANCE.md`. Last-verified date pending
-  Mark's local run.
+  and documented in `docs/ACCEPTANCE.md`. Verified 2026-04-25.
+- **Opening balances + trial balance (Group F): passing.** Service +
+  CLI + engine + HTML + CSV/XLSX/PDF. Real-fixture render confirmed
+  against `default_coa.json` + the 6-row sample CSV; totals tie out
+  at $27,350 each side. Documented in `docs/ACCEPTANCE.md`. Verified
+  2026-04-25.
 - **#12 Authentication + session timeout + audit log: partial** — all
   plumbing in place; viewer UI lands in Stage 9. AuditLog vocabulary now
   controlled by `AuditAction` TextChoices.

@@ -19,6 +19,8 @@ checked-into-the-repo public version.
 | [ADR-002](#adr-002-stage-1-clarifications-batch-2) | Stage 1 clarifications (Batch #2) | Stage 1 / pre-A |
 | [ADR-003](#adr-003-handsontable-ce-and-recovery-via-management-commands-batch-3) | Handsontable-CE + recovery via mgmt commands (Batch #3) | Stage 1 / Group C |
 | [ADR-004](#adr-004-coa-loader-format-display_order-system-account-rules-batch-4) | COA loader format, `display_order`, system-account rules (Batch #4) | Stage 1 / Group E |
+| [ADR-005](#adr-005-opening-balance-journal-entry-shape) | Opening-balance journal-entry shape | Stage 1 / Group F |
+| [ADR-006](#adr-006-period-close-stub-deferred-to-stage-2) | Period-close stub deferred to Stage 2 | Stage 1 / Group F |
 
 ---
 
@@ -159,3 +161,141 @@ existing system rows by `account_number` and skips them.
 Group C / Group D string-literal `action=` values onto it. A drift test
 asserts every distinct `AuditLog.action` value in the DB is a member of
 the enum.
+
+---
+
+## ADR-005 — Opening-balance journal-entry shape
+
+**Status:** Accepted (2026-04-25). Group F.1.
+
+Opening balances are entered via a single public service —
+`books.accounting.opening_balances.set_opening_balance()` — which posts
+one balanced 2-line journal entry per (account, as_of) pair. The
+service never bypasses Group D's `post_entry()`; opening balances are
+real journal entries with the same immutability and audit semantics as
+any other posting.
+
+**JE shape**
+
+For an account with `normal_balance = DEBIT` (Asset, Expense):
+- Line 1: target account, `debit_amount = amount`, `credit_amount = 0`
+- Line 2: system Opening Balance Equity (`3-9100`),
+  `debit_amount = 0`, `credit_amount = amount`
+
+For an account with `normal_balance = CREDIT` (Liability, Equity):
+sides flipped — the user's amount lands as a credit on the target,
+offset debits Opening Balance Equity.
+
+The user always supplies a positive `amount`; sign is implied by the
+target account's normal_balance. Revenue and Expense accounts are
+rejected (carry-forward types only — Asset, Liability, Equity).
+
+**Reference number convention**
+
+Every opening JE uses
+`reference_number = f"OB:{account.account_number}:{as_of.isoformat()}"`.
+Deterministic per (account, as_of). The reference is the basis for the
+duplicate-check filter and the F.5 export `Content-Disposition`
+filename.
+
+**Duplicate-check filter** (the F.1 bug-pair lesson is canonical here)
+
+The service refuses re-posting at the same (account, as_of) when an
+"active" opening JE exists. "Active" is defined as:
+
+```
+JournalEntry.objects.filter(
+    reference_number=ref,
+    reversed_by__isnull=True,        # not yet reversed
+    reversing_entry__isnull=True,    # not itself a reversal
+).exists()
+```
+
+Both conditions are necessary. Group D's `reverse_entry()` copies the
+original's `reference_number` onto the reversal, so without the second
+condition the reversal would match the filter and block legitimate
+re-posting after `reverse_opening_balance()`. The F.1 commit history
+documents the bug-pair: an initial too-narrow filter (missing condition
+2) shipped paired with a too-narrow assertion in the regression test
+(counted total reference_number rows instead of active rows). Both
+"read approximately right" at review time; both failed for the same
+shape of reason. See `feedback_assertion_strength.md` for the
+class-of-bug catalog this generated.
+
+**Test patterns established**
+
+- Refusal contract: each refusal path (system account, type, zero
+  amount, duplicate, period-close stub) writes an
+  `OPENING_BALANCE_REFUSED` audit row before raising
+  `OpeningBalanceError`. The audit trail captures attempted writes,
+  not just successful ones.
+- FK-shape assertions: tests verify `original.reversed_by.exists()` and
+  `reversal.reversing_entry_id == original.pk` directly, instead of
+  inferring via row counts.
+- Reverse + re-post round-trip: the contract is "idempotent only via
+  the explicit reverse + re-post path"; the regression test posts a JE,
+  refuses a same-(account, as_of) re-post, reverses, then succeeds at
+  re-posting. Asserts each FK link individually.
+
+---
+
+## ADR-006 — Period-close stub deferred to Stage 2
+
+**Status:** Accepted (2026-04-25). Group F.1.
+
+Opening-balance posting must refuse if `as_of` falls inside a closed
+fiscal period. **Today, no `FiscalPeriod` model exists.** Stage 2's
+period-close work introduces it. F.1 ships the activation site as a
+stub so Stage 2 can drop the real check in without introducing a new
+call site.
+
+**Activation site**
+
+`books/accounting/opening_balances.py::_check_period_open(as_of)`.
+Currently a deliberate no-op with the intended Stage-2 logic
+documented in a `# TODO(stage-2)` comment block:
+
+```python
+def _check_period_open(as_of: date) -> None:
+    # TODO(stage-2): activate this check when books.periods.FiscalPeriod
+    # exists. The intended behavior:
+    #
+    #     from books.periods.models import FiscalPeriod, FiscalPeriodStatus
+    #     overlapping_closed = FiscalPeriod.objects.filter(
+    #         status=FiscalPeriodStatus.CLOSED,
+    #         end_date__gte=as_of,
+    #     ).exists()
+    #     if overlapping_closed:
+    #         raise OpeningBalanceError(
+    #             f"Cannot set opening balance as_of {as_of}; one or more "
+    #             "closed fiscal periods cover or follow that date. Reopen "
+    #             "the period first."
+    #         )
+    return None
+```
+
+Grep `TODO(stage-2)` to find this and any sibling activation sites
+when Stage 2 begins.
+
+**Contract** (binding for the Stage-2 implementation)
+
+Refuse with `OpeningBalanceError` if any `FiscalPeriod` with
+`status=CLOSED` and `end_date >= as_of` exists. The "cover or follow"
+phrasing means: any closed period whose end is at or after `as_of`
+blocks an opening-balance posting at `as_of`. Reopening the period via
+the period-close API (Stage 2 deliverable) is the unblock path.
+
+**Why a stub instead of skipping the check entirely**
+
+Two reasons:
+
+1. **Discoverability.** Stage 2's period-close work needs to find every
+   call site that should consult `FiscalPeriod`. A `TODO(stage-2)`
+   marker at the actual gate is more reliable than a search through
+   all of `books.accounting`.
+2. **Test pinning.** F.1 includes
+   `test_period_close_check_is_currently_a_noop` which exercises both
+   far-past and far-future `as_of` dates and confirms neither is
+   refused today. When Stage 2 activates the gate, that test will
+   need to be updated — making the activation a visible diff in test
+   code, not a silent behavior change.

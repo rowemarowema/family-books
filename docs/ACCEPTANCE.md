@@ -102,6 +102,80 @@ runs a 75-entry hypothesis property test that asserts
 
 ---
 
+### Opening balances + trial balance (Group F)
+
+**Status:** passing (engine + HTML + CSV/XLSX/PDF; CLI-driven entry,
+no UI form yet — that's Stage 2's Handsontable grid).
+
+**Commands (full demo from a fresh DB):**
+
+```bash
+make migrate
+python manage.py bootstrap_owner --email mark@example.com
+python manage.py seed_default_coa
+python manage.py set_opening_balance --csv fixtures/sample_opening_balances.csv
+python manage.py runserver
+# Browse to:
+#   /reports/trial-balance/?as_of=2026-04-25
+# Expect: Bootstrap-styled table, "Balanced" badge, 6 user-side rows
+# + OBE row + 5 type-header rows. Totals tie out at $27,350.00 each
+# side.
+
+# Then download all four formats from the URL:
+#   /reports/trial-balance/?as_of=2026-04-25                     (HTML)
+#   /reports/trial-balance/?as_of=2026-04-25&format=csv
+#   /reports/trial-balance/?as_of=2026-04-25&format=xlsx
+#   /reports/trial-balance/?as_of=2026-04-25&format=pdf
+# Open each in the appropriate app; cells match HTML.
+```
+
+**Expected output (CLI side):**
+
+```
+Created owner mark@example.com (id=1).
+Seeded 3 system + 640 user accounts (NNN parent links) from default_coa.json.
+Posted 6 opening balance JE(s) from sample_opening_balances.csv.
+```
+
+**Expected trial balance (rendered):**
+
+| Account | Debits | Credits | Balance |
+|---|---|---|---|
+| 1-0179 BOA - Savings | 8,500.00 | 0.00 | 8,500.00 |
+| 1-0196 Checking (6708) | 12,000.00 | 0.00 | 12,000.00 |
+| 1-0270 E\*Trade - Cash (under Investments:E\*Trade) | 4,500.00 | 0.00 | 4,500.00 |
+| 2-0002 Amazon Prime VISA | 0.00 | 650.00 | 650.00 |
+| 2-0011 Golf Contest (under Contest Pots) | 0.00 | 1,200.00 | 1,200.00 |
+| 2-0015 Rowe Bowl (under Contest Pots) | 0.00 | 500.00 | 500.00 |
+| 3-9100 Opening Balance Equity | 2,350.00 | 25,000.00 | 22,650.00 cr |
+| **Total** | **27,350.00** | **27,350.00** | **Balanced** |
+
+(Parent rollups: `Investments:E*Trade` shows own=0, rollup=4,500.00;
+`Contest Pots` shows own=0, rollup=1,700.00.)
+
+**Audit trail:** `OPENING_BALANCE_SET` × 6 in addition to the prior
+COA-bootstrap + auth rows.
+
+**Property tests proving the contract end-to-end:**
+
+- `test_loads_real_fixture_into_643_rows` — COA load.
+- `test_real_fixture_csv_smoke` — CSV import → exactly 6 JEs + per-
+  account amounts.
+- `test_real_fixture_plus_opening_balances_balances` — engine
+  `is_balanced` after the same fixture data.
+- `test_cell_level_round_trip_html_csv_xlsx_match_engine` — every
+  HTML/CSV/XLSX cell equals the engine field, quantized to 2dp.
+- `test_real_fixture_all_four_formats_download` — GET each format,
+  non-empty + correct Content-Type + known amount visible.
+- `test_no_template_comment_leaks_in_rendered_body` — regression
+  pin for the F.5 multi-line `{# ... #}` bug.
+
+**Last verified:** 2026-04-25 (Group F commits `4893c34` through
+`7ba09af`); Mark confirmed render against the real fixture, totals
+$27,350 each side, "Balanced" badge.
+
+---
+
 ## Items not yet reachable
 
 The remaining BUILD_SPEC §11 items depend on later stages and are
