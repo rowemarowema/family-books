@@ -2,19 +2,26 @@
 #
 # Render auto-deploys from `main` whenever a new commit lands. The CI
 # pipeline (.github/workflows/ci.yml) plus GitHub branch protection on
-# main means anything Render sees has already passed the four-step
-# verification (check / migrate / makemigrations dry-run / lint /
-# typecheck / test) — implicit gating, no webhook plumbing required.
+# main means anything Render sees has already passed the verification
+# pipeline (check / migrate / check-deploy / makemigrations dry-run /
+# lint / typecheck / test) — implicit gating, no webhook plumbing.
 #
 # See docs/CI.md for the full chain: PR → CI → branch protection →
 # merge → Render auto-deploy.
 #
-# UNVERIFIED note: the precise schema keys for pythonVersion and the
-# system-package pre-install step are per Render's current docs.
-# Group H validates this end-to-end against an actual Render service;
-# any schema corrections land then.
+# UNVERIFIED notes (Group H validates end-to-end against an actual
+# Render service; schema corrections land in commits H.5b through
+# H.5N as discovered):
+#   - pythonVersion key: best-known per Render docs as of 2026-04-25
+#   - postgresMajorVersion key: same
+#   - Cron Job schedule key: best-known as `schedule` per Render docs
+#   - The first deploy attempt is the validation. Each correction lands
+#     as a discrete commit citing the Render error message it fixes.
 
 services:
+  # ---------------------------------------------------------------
+  # Web service (the Django app)
+  # ---------------------------------------------------------------
   - type: web
     name: family-books
     env: python
@@ -24,37 +31,34 @@ services:
 
     # Pin Python to 3.12 (matches CI's actions/setup-python and the
     # project's requires-python in pyproject.toml). Mismatched minor
-    # versions are an expensive class of "works in CI, fails in prod"
-    # bug.
+    # versions are an expensive "works in CI, fails in prod" bug.
     pythonVersion: "3.12"
 
-    # Build: apt-install GTK system libs for WeasyPrint (PDF export
-    # in F.5), then `pip install .` (non-editable; production posture).
-    # Without the apt step, weasyprint fails to load the Pango/Cairo
-    # shared libs at runtime and PDF endpoints return 503 (the lazy-
-    # import + typed PDFRendererUnavailable fallback from
-    # books/accounting/reports/exporters/pdf_export.py).
-    #
-    # See docs/SETUP.md "Production deploy on Render" for the
-    # underlying reasoning + the planned Group H startup-check that
-    # will fail-fast if this apt step is silently skipped.
+    # apt-install the system libs needed by:
+    #   weasyprint (libpango / libpangoft2 / libgdk-pixbuf2.0)
+    #   age (encrypted backup tooling, used by backup_db / restore_db
+    #        management commands; H.1 / H.2). age is in Debian stable.
+    # Without these, the Group H WeasyPrint startup check (W001) fires
+    # as a build-failing error via `make check-deploy`, and backup_db
+    # would fail at runtime with "age: command not found".
     buildCommand: |
       apt-get update && \
-      apt-get install -y libpango-1.0-0 libpangoft2-1.0-0 libgdk-pixbuf2.0-0 && \
+      apt-get install -y libpango-1.0-0 libpangoft2-1.0-0 libgdk-pixbuf2.0-0 age && \
       pip install --upgrade pip && \
       pip install . && \
+      python manage.py check --deploy --fail-level WARNING && \
       python manage.py collectstatic --noinput && \
       python manage.py migrate --noinput
 
     startCommand: gunicorn family_books.wsgi:application
 
-    # Production-only env vars. Real values set in the Render dashboard
+    # Production env vars. Real values set in the Render dashboard
     # (NOT committed to git). The keys here document what's required.
     envVars:
       - key: DJANGO_SETTINGS_MODULE
         value: family_books.settings.prod
       - key: SECRET_KEY
-        sync: false   # value lives in dashboard
+        sync: false   # dashboard secret
       - key: DATABASE_URL
         fromDatabase:
           name: family-books-db
@@ -62,7 +66,54 @@ services:
       - key: REQUIRE_2FA
         value: "true"
       - key: ALLOWED_HOSTS
-        sync: false   # value lives in dashboard
+        sync: false   # dashboard secret
+
+  # ---------------------------------------------------------------
+  # Cron job: nightly backup (Group H)
+  # ---------------------------------------------------------------
+  # Runs `python manage.py backup_db` at 03:00 UTC daily.
+  # See ADR-001 / Batch #1 #3 for the retention policy
+  # (30 daily + 12 monthly + 7 annual to Backblaze B2).
+  - type: cron
+    name: family-books-nightly-backup
+    env: python
+    plan: starter
+    branch: main
+    schedule: "0 3 * * *"   # 03:00 UTC daily
+
+    # Same build command as the web service so the same image has
+    # pg_dump, age, and the Django app code available.
+    buildCommand: |
+      apt-get update && \
+      apt-get install -y libpango-1.0-0 libpangoft2-1.0-0 libgdk-pixbuf2.0-0 age postgresql-client && \
+      pip install --upgrade pip && \
+      pip install .
+
+    startCommand: python manage.py backup_db --reason scheduled
+
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: family_books.settings.prod
+      - key: SECRET_KEY
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: family-books-db
+          property: connectionString
+      # Age recipient (public key) for encrypting the dump.
+      - key: AGE_RECIPIENT
+        sync: false   # dashboard secret
+      # Backblaze B2 credentials (S3-compatible API).
+      - key: B2_ENDPOINT_URL
+        sync: false
+      - key: B2_KEY_ID
+        sync: false
+      - key: B2_APPLICATION_KEY
+        sync: false
+      - key: B2_BUCKET_NAME
+        sync: false
+      - key: B2_PREFIX
+        value: "prod/"
 
 databases:
   - name: family-books-db
