@@ -1,0 +1,49 @@
+# Files that should never end up in the build context.
+
+# Local Python artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtualenvs (host-side; the image builds its own at /opt/venv)
+.venv/
+venv/
+env/
+
+# Local-only env / secrets
+.env
+.env.production
+.env.*.local
+
+# Local DB / Docker volumes / scratch
+*.sqlite3
+sample-data/
+scratch/
+docs/historical/
+
+# IDE / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# CI / docs that don't belong in the runtime image
+.github/
+docs/
+*.md
+
+# Tests live in the image only if we run them there (we don't —
+# CI runs them on the host). Keeps the image smaller.
+tests/
+
+# Node / front-end (not used; placeholder for future polish)
+node_modules/
