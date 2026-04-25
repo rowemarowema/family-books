@@ -411,12 +411,128 @@ gates are:
   each as the owner, and asserts no template-syntax tokens (`{#`,
   `{% comment %}`, raw `{% if`, raw `{% for`, etc.) appear in any
   response body. One test, broad coverage.
+- **Group H** — backups + restore + rollback drill + WeasyPrint
+  startup check + render.yaml validation.
+  - `books/core/backup/{retention,storage}.py` — pure-Python retention
+    policy (30d + 12mo + 7y per ADR-001) and B2 client wrapper.
+  - `backup_db` / `restore_db` / `drill_rollback` management commands.
+    Pipeline: pg_dump → age encrypt → B2 upload → retention prune →
+    audit row. Restore: B2 download → age decrypt → pg_restore.
+    Drill: backup → restore-into-scratch → 7-point verification
+    (counts × 5 + system-account presence + BOA spot-check value).
+  - 4 new AuditAction members: BACKUP_CREATED, BACKUP_RESTORED,
+    BACKUP_DRILL_PASSED, BACKUP_DRILL_FAILED. Audit migration 0004
+    extends the choice list. Drift test extends to 19 members.
+  - WeasyPrint Django check `books.web.W001` (Warning level) +
+    `books/web/apps.py` ready() hook. CI workflow inserts
+    `make check-deploy` between `make migrate` and the dry-run, so
+    GTK-missing on the runner fails the build.
+  - `render.yaml` extended: `age` added to apt-install line; new
+    Cron Job service `family-books-nightly-backup` runs `backup_db
+    --reason scheduled` at 03:00 UTC daily; `check --deploy --fail-
+    level WARNING` added to web service build command.
+  - `Makefile` adds `make backup-then-migrate` — pre-migration
+    discipline target (deliberate-ops-action shape per #22, #23).
+    NOT automatic on `make migrate`.
+  - `docs/ROLLBACK.md` (new) — full runbook: bad-deploy via Render
+    manual-deploy, reversible vs. irreversible migration rollback,
+    LastPass age-key recovery for the dead-laptop case, Render-down
+    scenario, missed-backup detection. Drill-log section for
+    recording quarterly drill executions.
+  - **Sub-commits (6 to date):**
+    - `0ce9c05` H.1 — backup_db + retention + storage + audit migration
+    - `0d8127e` H.2 — restore_db + safety flags
+    - `e7e0429` H.3 — drill_rollback + broadened verification
+    - `6f71afc` H.4 — WeasyPrint Django check + CI gating
+    - `5256444` H.5a — render.yaml updates (initial; UNVERIFIED:1
+      pending Render deploy validation)
+    - [H.6 hash] — docs/ROLLBACK.md + summary (this commit)
+  - **H.5 sub-series continues** if/when the actual Render deploy
+    surfaces schema corrections. Each correction lands as a discrete
+    commit citing the Render error message it fixes.
+
+### Design decisions made during Group H
+
+1. **Retention semantics use "top-N within horizon," not calendar
+   windows.** A calendar-window framing ("everything in last 365
+   days") overcounts at boundaries; "top 12 most-recent
+   (year, month) buckets within the 12-month horizon" gives the
+   exact spec count (max 49) regardless of where today falls in the
+   calendar year. Tested by 19 unit tests with synthetic 10-year
+   datasets.
+2. **age binary, not Python age library.** The Debian stable `age`
+   package is the standard; pyrage on PyPI is less mature. Backup/
+   restore commands shell out to `age` via subprocess, similar to
+   how they shell out to pg_dump / pg_restore. apt-install in
+   render.yaml carries the binary into the production image.
+3. **Refuse-not-default on `restore_db --into`.** No default to
+   `$DATABASE_URL` (silent prod overwrite would be too easy). The
+   --confirm-prod-restore double-flag is required when --into
+   resolves to the same (host, port, database) tuple as
+   $DATABASE_URL — same shape as `reset_coa --confirm-destroy`.
+4. **CI doesn't run the real drill.** No B2 credentials, no
+   scratch Postgres in the GitHub Actions runner. CI tests the
+   orchestration code paths via mocked B2 + mocked psycopg cursor;
+   the real drill is run-once-locally by Mark and recorded in
+   `docs/ROLLBACK.md` § drill log. Mark's standing distinction:
+   "CI proves the code paths work; the local drill proves the
+   operational toolchain works end-to-end."
+5. **Drill verification is broadened over the breakdown's
+   minimum.** Per refinement #3: counts (×5) + system-account
+   presence + spot-check value on `1-0179` BOA Savings. The
+   spot-check catches "counts match but values corrupted" — class-
+   of-bug pattern #3 (encoded count vs. wrong target population),
+   applied here as encoded count vs. data integrity.
+6. **WeasyPrint check is a Warning, not an Error, locally.** Local
+   `make check` doesn't block on missing GTK (Windows dev
+   reality). CI `make check-deploy` (`--fail-level WARNING`) and
+   render.yaml's build command (`check --deploy --fail-level
+   WARNING`) convert it to a build-failing Error. The runtime 503
+   fallback in F.5's PDF view becomes "should never fire" rather
+   than just "shouldn't fire."
+7. **render.yaml is UNVERIFIED until the actual Render deploy.**
+   pythonVersion / postgresMajorVersion / cron schedule keys are
+   best-known per Render docs. Group H's H.5 sub-series captures
+   any corrections as discrete commits citing specific error
+   messages. Once the deploy succeeds, a final commit pins the
+   verified-on-date as the constraint baseline.
+
+### Class-of-bug catalog (running list, after Group H)
+
+No new patterns surfaced in Group H. The 4-row catalog from
+`memory/feedback_assertion_strength.md` continues to apply; pattern
+#3 (encoded count vs. wrong target population) was specifically
+guarded against by the broadened drill verification (#5 above).
+
+### Deferred
+
 - **WeasyPrint deploy startup check** deferred to **Group H**. The
   F.5 PDF exporter degrades gracefully (lazy import + typed
   `PDFRendererUnavailable` → 503); Group H adds a startup check that
   exercises `import weasyprint` at boot and fails fast if Render's
   apt-install was silently skipped. Defense in depth on top of the
-  runtime fallback.
+  runtime fallback. **— RESOLVED in H.4 via `make check-deploy`
+  in render.yaml's build command.**
+- **Automated quarterly drill** deferred to **Group I or Stage 2**.
+  H.3 ships a manual drill (Mark runs `drill_rollback --use-b2`
+  quarterly per calendar reminder). Automating it requires a
+  scratch Render Postgres + scheduled cron, marginal ROI for a
+  single-user system. The high-ROI piece is the daily backup itself
+  — a missing `BACKUP_CREATED` audit row catches most failure modes
+  silently.
+- **Backup-failure monitoring alert** deferred to **Group I**.
+  Today's detection is the manual query in `docs/ROLLBACK.md` § 6.
+  Group I wires it into an alert (email or Slack) so a missed
+  nightly backup pages the operator without manual checking.
+- **render.yaml schema corrections (H.5b through H.5N)** pending
+  the actual Render deploy. Each correction lands as a discrete
+  commit citing the specific error message. Once the deploy
+  succeeds, a final commit pins the verified-on-date in
+  render.yaml as the constraint baseline for future edits.
+- **H.3 drill execution recording** pending Mark's local drill
+  run. `docs/ROLLBACK.md` § drill log has the placeholder section
+  ready to fill in (date, duration, source counts, spot-check
+  value).
 - **mypy backlog (typecheck demoted to informational)** deferred to
   **Group I**. Adding mypy as a CI stage in Group G surfaced ~71
   pre-existing missing-annotation findings across Groups D-F. None
@@ -585,6 +701,12 @@ checklist is the bridge.
   against `default_coa.json` + the 6-row sample CSV; totals tie out
   at $27,350 each side. Documented in `docs/ACCEPTANCE.md`. Verified
   2026-04-25.
+- **Backups + restore + rollback drill (Group H): passing
+  (in-code) / pending Mark's local drill execution.** backup_db /
+  restore_db / drill_rollback management commands; Render Cron Job
+  for nightly backup; `docs/ROLLBACK.md` runbook. Real B2 round-trip
+  + actual Render deploy validation are Mark's local + deploy steps
+  ahead of the next group.
 - **#12 Authentication + session timeout + audit log: partial** — all
   plumbing in place; viewer UI lands in Stage 9. AuditLog vocabulary now
   controlled by `AuditAction` TextChoices.

@@ -65,6 +65,11 @@ dataset: ## Load the seed test dataset (populated in later stages).
 backup: ## Run a one-off encrypted backup (wired in Group H).
 	$(MANAGE) backup_db
 
+.PHONY: backup-then-migrate
+backup-then-migrate: ## Pre-migration discipline: backup before migrating (docs/ROLLBACK.md).
+	$(MANAGE) backup_db --reason "pre-migration"
+	$(MANAGE) migrate
+
 .PHONY: restore
 restore: ## Restore from a backup object key (wired in Group H).
 	@[ -n "$(BACKUP_ID)" ] || (echo "Usage: make restore BACKUP_ID=<id> TARGET=<db_url>" && exit 1)
