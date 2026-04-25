@@ -77,6 +77,13 @@ omit = [
 show_missing = true
 skip_covered = false
 precision = 1
+# Coverage floor — Group G. Personal finance system handling real money;
+# the loose-floor cost (untested code creeping in) is worse than the
+# tight-floor cost (false-positive failures during refactor). 88% gives
+# 3.6 points of headroom from the 91.6% measured at the close of Group
+# F. pytest-cov reads this and exits non-zero if below; CI's `make
+# test` step trips on the same threshold.
+fail_under = 88
 exclude_lines = [
     "pragma: no cover",
     "raise NotImplementedError",

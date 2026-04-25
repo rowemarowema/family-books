@@ -46,8 +46,8 @@ format: ## Auto-fix lint issues.
 	ruff format .
 
 .PHONY: typecheck
-typecheck: ## Run mypy (strict on books/accounting, looser elsewhere).
-	mypy books family_books
+typecheck: ## Run mypy (Group G: scoped to books.accounting; strict mode).
+	mypy books/accounting
 
 .PHONY: test
 test: ## Run the full pytest suite with coverage gates.
