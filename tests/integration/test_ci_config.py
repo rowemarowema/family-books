@@ -54,33 +54,40 @@ def _index_of(step_names: list[str], token: str) -> int:
     return -1
 
 
-def test_all_six_required_steps_present(step_names):
-    """The four-step verification + lint + typecheck must all be
-    represented as named steps. Bare commands without step names
-    don't count — `name:` is what the GitHub UI surfaces and is the
-    contract this test pins.
+def test_all_seven_required_steps_present(step_names):
+    """The four-step verification + lint + typecheck + check-deploy
+    must all be represented as named steps. Bare commands without
+    step names don't count — `name:` is what the GitHub UI surfaces
+    and is the contract this test pins.
+
+    check-deploy was added in H.4 (refinement #1) so the WeasyPrint
+    W001 check fires as a build-failing error if GTK isn't apt-
+    installed on the CI runner.
     """
-    required = ["make check", "make migrate", "dry-run",
-                "make lint", "make typecheck", "make test"]
+    required = ["make check", "make migrate", "check-deploy",
+                "dry-run", "make lint", "make typecheck", "make test"]
     missing = [t for t in required if _index_of(step_names, t) < 0]
     assert not missing, f"Required CI steps missing: {missing}"
 
 
 def test_steps_run_in_required_order(step_names):
-    """check → migrate → dry-run → lint → typecheck → test.
+    """check → migrate → check-deploy → dry-run → lint → typecheck → test.
 
-    Reordering changes the failure mode (e.g., running lint before
-    migrate would mean lint failures mask migration drift). Lock it.
+    check-deploy after migrate (so Django apps are loaded with their
+    real settings module) but before dry-run (so a deploy-mode check
+    failure aborts before the more-expensive autodetector run).
     """
     check_idx = _index_of(step_names, "make check")
     migrate_idx = _index_of(step_names, "make migrate")
+    check_deploy_idx = _index_of(step_names, "check-deploy")
     dryrun_idx = _index_of(step_names, "dry-run")
     lint_idx = _index_of(step_names, "make lint")
     typecheck_idx = _index_of(step_names, "make typecheck")
     test_idx = _index_of(step_names, "make test")
 
     assert check_idx < migrate_idx, "check must precede migrate"
-    assert migrate_idx < dryrun_idx, "migrate must precede dry-run"
+    assert migrate_idx < check_deploy_idx, "migrate must precede check-deploy"
+    assert check_deploy_idx < dryrun_idx, "check-deploy must precede dry-run"
     assert dryrun_idx < lint_idx, "dry-run must precede lint"
     assert lint_idx < typecheck_idx, "lint must precede typecheck"
     assert typecheck_idx < test_idx, "typecheck must precede test"

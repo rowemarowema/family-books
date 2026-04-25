@@ -80,6 +80,14 @@ jobs:
       - name: Step 2 — make migrate (apply migrations on a fresh DB)
         run: make migrate
 
+      - name: Step 2.5 — make check-deploy (Warnings → Errors)
+        # Refinement #1 from the H.4 breakdown: CI runs check-deploy
+        # so the WeasyPrint W001 check fires as a build-failing
+        # error if GTK isn't installed in the runner. Production
+        # (render.yaml) runs the same target. Local `make check` keeps
+        # WeasyPrint as a Warning so Windows dev isn't blocked.
+        run: make check-deploy
+
       - name: Step 3 — makemigrations --dry-run (must report no changes)
         run: |
           OUTPUT=$(python manage.py makemigrations --dry-run 2>&1)
