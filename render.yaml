@@ -1,0 +1,70 @@
+# Render deploy configuration for Family Books.
+#
+# Render auto-deploys from `main` whenever a new commit lands. The CI
+# pipeline (.github/workflows/ci.yml) plus GitHub branch protection on
+# main means anything Render sees has already passed the four-step
+# verification (check / migrate / makemigrations dry-run / lint /
+# typecheck / test) — implicit gating, no webhook plumbing required.
+#
+# See docs/CI.md for the full chain: PR → CI → branch protection →
+# merge → Render auto-deploy.
+#
+# UNVERIFIED note: the precise schema keys for pythonVersion and the
+# system-package pre-install step are per Render's current docs.
+# Group H validates this end-to-end against an actual Render service;
+# any schema corrections land then.
+
+services:
+  - type: web
+    name: family-books
+    env: python
+    plan: starter
+    branch: main
+    autoDeploy: true
+
+    # Pin Python to 3.12 (matches CI's actions/setup-python and the
+    # project's requires-python in pyproject.toml). Mismatched minor
+    # versions are an expensive class of "works in CI, fails in prod"
+    # bug.
+    pythonVersion: "3.12"
+
+    # Build: apt-install GTK system libs for WeasyPrint (PDF export
+    # in F.5), then `pip install .` (non-editable; production posture).
+    # Without the apt step, weasyprint fails to load the Pango/Cairo
+    # shared libs at runtime and PDF endpoints return 503 (the lazy-
+    # import + typed PDFRendererUnavailable fallback from
+    # books/accounting/reports/exporters/pdf_export.py).
+    #
+    # See docs/SETUP.md "Production deploy on Render" for the
+    # underlying reasoning + the planned Group H startup-check that
+    # will fail-fast if this apt step is silently skipped.
+    buildCommand: |
+      apt-get update && \
+      apt-get install -y libpango-1.0-0 libpangoft2-1.0-0 libgdk-pixbuf2.0-0 && \
+      pip install --upgrade pip && \
+      pip install . && \
+      python manage.py collectstatic --noinput && \
+      python manage.py migrate --noinput
+
+    startCommand: gunicorn family_books.wsgi:application
+
+    # Production-only env vars. Real values set in the Render dashboard
+    # (NOT committed to git). The keys here document what's required.
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: family_books.settings.prod
+      - key: SECRET_KEY
+        sync: false   # value lives in dashboard
+      - key: DATABASE_URL
+        fromDatabase:
+          name: family-books-db
+          property: connectionString
+      - key: REQUIRE_2FA
+        value: "true"
+      - key: ALLOWED_HOSTS
+        sync: false   # value lives in dashboard
+
+databases:
+  - name: family-books-db
+    plan: starter
+    postgresMajorVersion: "16"
