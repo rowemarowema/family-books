@@ -20,6 +20,11 @@ dependencies = [
     "django-formtools>=2.5,<3.0",
     "django-axes>=7.0,<8.0",
     "openpyxl>=3.1,<4.0",
+    # Group F.5 PDF export. Required in production. Render build needs
+    # libpango / libgdk-pixbuf system libs (see docs/SETUP.md). Local
+    # Windows dev without GTK degrades to 503 via lazy import in
+    # books/accounting/reports/exporters/pdf_export.py.
+    "weasyprint>=62.0,<70.0",
     "pyyaml>=6.0,<7.0",
     "gunicorn>=23.0,<24.0",
     "whitenoise>=6.7,<7.0",
@@ -37,6 +42,9 @@ dev = [
     # Group F.4: cell-level tie-out test parses rendered HTML and
     # asserts each data-value matches the engine field. Test-only.
     "beautifulsoup4>=4.12,<5.0",
+    # Group F.5: PDF smoke test extracts text from the rendered PDF
+    # and asserts known amounts appear. Test-only.
+    "pypdf>=4.0,<6.0",
     "ruff>=0.6,<1.0",
     "mypy>=1.11,<2.0",
     "django-stubs[compatible-mypy]>=5.1,<6.0",

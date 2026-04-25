@@ -27,6 +27,12 @@ from django.shortcuts import render
 from django.utils import timezone
 
 from books.accounting.models import AccountType
+from books.accounting.reports.exporters import (
+    PDFRendererUnavailable,
+    render_csv,
+    render_pdf,
+    render_xlsx,
+)
 from books.accounting.reports.trial_balance import (
     TYPE_ORDER,
     TrialBalanceRow,
@@ -35,9 +41,18 @@ from books.accounting.reports.trial_balance import (
 from books.core.auth import owner_only_with_2fa
 
 
-# F.4 ships html only. F.5 will extend this tuple to include
-# csv|xlsx|pdf and add format-dispatch branches below.
-VALID_FORMATS = ("html",)
+# F.4 shipped html only; F.5 extends to csv/xlsx/pdf, all served via
+# the same URL with the format dispatched on the ?format= query param.
+VALID_FORMATS = ("html", "csv", "xlsx", "pdf")
+
+CONTENT_TYPES = {
+    "csv": "text/csv; charset=utf-8",
+    "xlsx": (
+        "application/vnd.openxmlformats-officedocument."
+        "spreadsheetml.sheet"
+    ),
+    "pdf": "application/pdf",
+}
 
 
 @owner_only_with_2fa
@@ -69,8 +84,44 @@ def trial_balance_view(request: HttpRequest) -> HttpResponse:
         types=params.get("types"),
     )
 
-    # Only "html" is permitted by VALID_FORMATS today; F.5 extends.
-    return _render_html(request, tb)
+    fmt = params["format"]
+    if fmt == "html":
+        return _render_html(request, tb)
+    if fmt == "csv":
+        return _attachment(render_csv(tb), CONTENT_TYPES["csv"],
+                           _filename(tb, "csv"))
+    if fmt == "xlsx":
+        return _attachment(render_xlsx(tb), CONTENT_TYPES["xlsx"],
+                           _filename(tb, "xlsx"))
+    # fmt == "pdf"
+    try:
+        body = render_pdf(tb, request)
+    except PDFRendererUnavailable as exc:
+        # GTK system libs not loadable. In production on Render this
+        # should never fire (build-time apt-install). Surface a 503
+        # with the underlying message so the operator can see the
+        # missing-dep hint immediately.
+        return HttpResponse(
+            f"PDF rendering unavailable: {exc}",
+            status=503,
+            content_type="text/plain; charset=utf-8",
+        )
+    return _attachment(body, CONTENT_TYPES["pdf"], _filename(tb, "pdf"))
+
+
+# ---------------------------------------------------------------------------
+# Export response helpers
+# ---------------------------------------------------------------------------
+
+
+def _filename(tb, ext: str) -> str:
+    return f"trial-balance-{tb.as_of.isoformat()}.{ext}"
+
+
+def _attachment(body: bytes, content_type: str, filename: str) -> HttpResponse:
+    response = HttpResponse(body, content_type=content_type)
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
 
 
 # ---------------------------------------------------------------------------

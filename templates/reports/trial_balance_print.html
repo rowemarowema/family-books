@@ -1,0 +1,18 @@
+{% extends "reports/trial_balance.html" %}
+
+{# Print-specific styling. Inherits the table from the on-screen view
+   so cell-level tie-out across HTML/PDF is structurally guaranteed.
+   PDF gets A4 portrait, smaller body font, no header chrome. #}
+{% block content %}
+<style>
+  @page {
+    size: A4 portrait;
+    margin: 1.5cm 1.2cm;
+  }
+  body { font-size: 10pt; }
+  table.table { font-size: 9pt; }
+  thead { display: table-header-group; }   /* repeat header on each page */
+  tfoot { display: table-row-group; }
+</style>
+{{ block.super }}
+{% endblock %}
