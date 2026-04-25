@@ -147,6 +147,52 @@ class Account(models.Model):
                     ),
                 }
             )
+        # System-account protections (Group E commit 2):
+        #   1. is_system=True is reserved for Equity accounts. The 3 v1
+        #      system accounts (Owner's Equity, Opening Balance Equity,
+        #      Retained Earnings) are all Equity; we treat that as a hard
+        #      rule rather than a convention to keep future drift visible.
+        if self.is_system and self.type != AccountType.EQUITY:
+            raise ValidationError(
+                {
+                    "is_system": (
+                        "is_system=True is only valid for Equity accounts; "
+                        f"got type='{self.type}'."
+                    )
+                }
+            )
+        #   2. is_system is immutable after create. The loader sets it on
+        #      INSERT; nothing else may flip it. Compare against the saved
+        #      DB value rather than instance state because instance state
+        #      is what the caller is trying to write.
+        if self.pk is not None:
+            saved_is_system = (
+                type(self)
+                .objects.filter(pk=self.pk)
+                .values_list("is_system", flat=True)
+                .first()
+            )
+            if saved_is_system is not None and saved_is_system != self.is_system:
+                raise ValidationError(
+                    {
+                        "is_system": (
+                            "is_system is immutable after create. To change "
+                            "the COA scaffolding, run `reset_coa --confirm-destroy "
+                            "\"<reason>\"` and re-seed."
+                        )
+                    }
+                )
+        #   3. System accounts cannot be deactivated. Use reset_coa to
+        #      remove user data; system accounts persist across resets.
+        if self.is_system and not self.is_active:
+            raise ValidationError(
+                {
+                    "is_active": (
+                        "System accounts cannot be deactivated. They are "
+                        "infrastructure for the accounting engine itself."
+                    )
+                }
+            )
         # Hierarchy depth (walk parent chain; raise if would become > 4).
         depth = 1
         node = self.parent_account

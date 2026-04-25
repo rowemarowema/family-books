@@ -58,6 +58,19 @@ class AccountAdmin(django_admin.ModelAdmin):
     )
     readonly_fields = ("is_system",)
 
+    def get_readonly_fields(self, request, obj=None):  # type: ignore[override]
+        """System accounts: is_active is readonly too.
+
+        Account.clean() rejects deactivating a system account, so the
+        write would fail at the model layer regardless. Removing the
+        field from the form is the friendly version of that protection
+        — the user can't even attempt the bad write.
+        """
+        readonly = list(super().get_readonly_fields(request, obj))
+        if obj is not None and obj.is_system and "is_active" not in readonly:
+            readonly.append("is_active")
+        return readonly
+
     def has_delete_permission(self, request, obj=None):  # type: ignore[override]
         # Accounts with posted lines are protected by on_delete=PROTECT
         # on JournalLine.account; deactivate (is_active=False) instead.
