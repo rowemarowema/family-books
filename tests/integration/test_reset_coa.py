@@ -282,3 +282,137 @@ def test_reset_then_seed_round_trips(tmp_path):
     call_command("seed_default_coa", "--fixture", str(fix))
     assert Account.objects.count() == 2
     assert Account.objects.filter(is_system=True).count() == 1
+
+
+# ---------------------------------------------------------------------------
+# Hierarchical-data tests (added 2026-04-24 after Mark caught the
+# ProtectedError bug on the real 640-account fixture)
+#
+# Account.parent_account.on_delete=PROTECT (Group D, intentional) blocks
+# ad-hoc parent deletes that would orphan children. A bulk
+# `Account.objects.filter(is_system=False).delete()` triggers PROTECT
+# against the first parent encountered, even when the children are also
+# in the queryset — PROTECT doesn't reason about what's also being
+# deleted. reset_coa now walks the user-account tree by depth and
+# deletes leaves first.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_reset_coa_handles_simple_parent_child_tree():
+    """Smaller hierarchical case (fast feedback during development).
+
+    Tree:
+        cash (root)
+          ├── checking
+          └── savings (which has a child)
+                └── high_yield_savings
+    """
+    cash = AccountFactory(
+        account_number="1-0001",
+        name="Cash",
+        type=AccountType.ASSET,
+        normal_balance=NormalBalance.DEBIT,
+    )
+    checking = AccountFactory(
+        account_number="1-0002",
+        name="Checking",
+        type=AccountType.ASSET,
+        normal_balance=NormalBalance.DEBIT,
+        parent_account=cash,
+    )
+    savings = AccountFactory(
+        account_number="1-0003",
+        name="Savings",
+        type=AccountType.ASSET,
+        normal_balance=NormalBalance.DEBIT,
+        parent_account=cash,
+    )
+    AccountFactory(
+        account_number="1-0004",
+        name="High-Yield",
+        type=AccountType.ASSET,
+        normal_balance=NormalBalance.DEBIT,
+        parent_account=savings,
+    )
+
+    call_command("reset_coa", "--confirm-destroy", "hierarchy test")
+
+    assert Account.objects.count() == 0
+    refused = AuditLog.objects.filter(action=AuditAction.COA_RESET_REFUSED)
+    assert refused.count() == 0
+    succeeded = AuditLog.objects.filter(action=AuditAction.COA_RESET)
+    assert succeeded.count() == 1
+    assert succeeded.get().after_value["deleted_user_account_count"] == 4
+
+
+@pytest.mark.django_db
+def test_reset_coa_against_real_640_account_fixture():
+    """Critical path: load the actual default_coa.json (640 user
+    accounts with ~428 parent-child relationships) and run reset_coa.
+
+    This is the test that would have caught the ProtectedError bug
+    Mark hit on his local smoke run. Loading a flat fixture didn't
+    exercise the parent-child PROTECT interaction; only the real
+    fixture (or one structurally similar) does.
+    """
+    call_command("seed_default_coa")
+    assert Account.objects.count() == 643
+
+    call_command("reset_coa", "--confirm-destroy", "real-fixture drill")
+
+    assert Account.objects.filter(is_system=False).count() == 0
+    assert Account.objects.filter(is_system=True).count() == 3
+
+    audit = AuditLog.objects.filter(action=AuditAction.COA_RESET).get()
+    assert audit.after_value["deleted_user_account_count"] == 640
+
+
+@pytest.mark.django_db
+def test_full_seed_refuse_reset_seed_cycle_against_real_fixture():
+    """End-to-end: the five-command smoke sequence in PROGRESS.md, run
+    as one integration test."""
+    call_command("seed_default_coa")
+    with pytest.raises(CommandError):
+        call_command("seed_default_coa")
+    call_command("reset_coa", "--confirm-destroy", "drill")
+    call_command("seed_default_coa")
+
+    assert Account.objects.count() == 643
+    assert Account.objects.filter(is_system=True).count() == 3
+
+    # Audit trail: 1 seed, 1 refusal, 1 reset, 1 second seed.
+    actions = list(
+        AuditLog.objects.order_by("timestamp").values_list("action", flat=True)
+    )
+    assert actions == [
+        AuditAction.COA_SEEDED,
+        AuditAction.COA_SEED_REFUSED,
+        AuditAction.COA_RESET,
+        AuditAction.COA_SEEDED,
+    ]
+
+
+@pytest.mark.django_db
+def test_reset_coa_preserves_parent_account_protect_for_other_callers():
+    """The reverse-depth deletion in reset_coa is NOT a relaxation of
+    PROTECT for direct callers. Verify the model-level PROTECT still
+    fires when someone tries to ad-hoc-delete a parent that has children.
+    """
+    parent = AccountFactory(
+        account_number="1-0001",
+        name="Parent",
+        type=AccountType.ASSET,
+        normal_balance=NormalBalance.DEBIT,
+    )
+    AccountFactory(
+        account_number="1-0002",
+        name="Child",
+        type=AccountType.ASSET,
+        normal_balance=NormalBalance.DEBIT,
+        parent_account=parent,
+    )
+
+    from django.db.models import ProtectedError
+    with pytest.raises(ProtectedError):
+        parent.delete()

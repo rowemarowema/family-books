@@ -184,6 +184,21 @@ complete, what is next, and any open questions. See
    Default user accounts use 0; system accounts use -100/-200/-300.
    Initial proposal (1/2/3) would have placed system accounts after
    user accounts; switched to negatives during the breakdown review.
+8. **`reset_coa` walks the user-account tree by depth.** A bulk
+   `Account.objects.filter(is_system=False).delete()` triggers
+   `Account.parent_account.on_delete=PROTECT` against the first parent
+   row encountered, even when the children are also in the queryset —
+   PROTECT doesn't reason about what's also being deleted. Fix:
+   compute depth in-memory, group by depth, delete deepest-first inside
+   one `transaction.atomic()`. Direct ad-hoc `account.delete()` calls
+   keep PROTECT semantics; only the orchestrated batch in `reset_coa`
+   walks the tree. Surfaced by Mark's smoke run against the real
+   640-account fixture; flat unit-test fixtures didn't exercise the
+   parent-child PROTECT interaction. New tests:
+   `test_reset_coa_handles_simple_parent_child_tree`,
+   `test_reset_coa_against_real_640_account_fixture`,
+   `test_full_seed_refuse_reset_seed_cycle_against_real_fixture`,
+   `test_reset_coa_preserves_parent_account_protect_for_other_callers`.
 7. **Hand-written migrations need `models.Index(name=...)` and
    alpha-sorted Q children.** The Group E review ran
    `makemigrations --dry-run` and found 7 indexes and 1 CheckConstraint
@@ -265,13 +280,16 @@ make test            # expect 77/77 green; books.accounting.* coverage ≥ 80%
 ```
 
 **Standing rule from now on:** every per-group verification block runs the
-following four steps in order, each must be clean:
+following four steps in order, each must be clean, plus a real-fixture
+smoke for any group that ships a command-line operation that touches
+user data:
 
 ```bash
 make check
 make migrate
 python manage.py makemigrations --dry-run    # must report "No changes detected"
 make test
+# + group-specific smoke against a realistic fixture (see below)
 ```
 
 `makemigrations --dry-run` was added to the standing rule after the Group
@@ -281,6 +299,17 @@ schema Django would derive from the current model state. The dry-run
 trips whenever the two diverge — wrong index name, mismatched Q-children
 ordering inside a CheckConstraint, missing `name=` on `models.Index`,
 etc. CI in Group G will run all four steps on every push.
+
+**Real-fixture smoke rule** (added 2026-04-24 after `reset_coa` shipped
+with a `Account.parent_account.on_delete=PROTECT` interaction bug that
+flat unit-test fixtures didn't exercise): for every command-line
+operation that touches user data, at least one test must use a fixture
+representative of production data shape — hierarchical where the model
+has hierarchy, multi-row where the model has volume, with realistic
+relationships. A passing test on a 3-row flat fixture is not proof the
+operation works on the 643-row hierarchical default_coa.json. Each
+group's verification block runs the smoke commands end-to-end against
+the real fixture before the group is declared done.
 
 ### Retrospective: Group C bug clusters and the pre-commit checklist
 

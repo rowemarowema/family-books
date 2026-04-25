@@ -5,8 +5,7 @@ Behavior table (Group E commit 4 — refinement #1):
 
     Refuses if posted JournalEntry exists  -> CommandError
     Refuses if any JournalLine exists      -> CommandError
-    Deletes user accounts (is_system=False) -> DELETE FROM account
-                                              WHERE is_system = FALSE
+    Deletes user accounts (is_system=False) -> reverse-depth ORM deletes
     Preserves system accounts              -> system rows untouched
     AuditLog records deleted_user_account_count
 
@@ -20,6 +19,23 @@ System accounts are preserved by design (Q1 in the Group E breakdown):
 they are infrastructure for the accounting engine, not user data.
 Preserving them avoids a transient inconsistent state between reset and
 re-seed, where opening-balance journals would have nowhere to point.
+
+Why reverse-depth, not a single bulk DELETE?
+    Account.parent_account has on_delete=PROTECT (Group D, intentional —
+    blocks ad-hoc parent deletes that would orphan children). A bulk
+    `Account.objects.filter(is_system=False).delete()` triggers PROTECT
+    against the FIRST parent encountered that has children, even when
+    those children are also in the queryset. PROTECT doesn't reason
+    about what's also being deleted.
+
+    The fix is structural: walk the user-account tree in-memory, group
+    by depth, and delete deepest-first inside one transaction. After
+    each depth level is deleted, the level above it has no inbound
+    parent_account references, so its delete passes the PROTECT check.
+
+    Direct ad-hoc deletes (a single Account.delete() call elsewhere)
+    keep the PROTECT semantics — only this orchestrated batch is
+    permitted to walk the tree.
 
 After running this command, `seed_default_coa` is safe to re-run; it
 detects existing system rows by account_number and skips them.
@@ -37,6 +53,49 @@ from books.accounting.models import (
     JournalEntryStatus,
     JournalLine,
 )
+
+
+def _user_account_depth_buckets() -> dict[int, list[int]]:
+    """Compute depth (root=1, leaf=N) for every user account by walking
+    parent_account_id in-memory; return {depth: [pk, pk, ...]} for use
+    by the reverse-depth delete loop.
+
+    Walks only within is_system=False rows. A user row whose parent is a
+    system row (or None) is treated as depth 1 — from the user-tree's
+    point of view it IS a root, and the depth loop never tries to delete
+    its system parent.
+    """
+    rows = list(
+        Account.objects.filter(is_system=False).values_list(
+            "id", "parent_account_id"
+        )
+    )
+    parent_of_user = {
+        row_id: parent_id
+        for row_id, parent_id in rows
+        # Only links into other user rows count for depth — system
+        # parents act as roots from the user-tree perspective.
+    }
+    user_pks = {row_id for row_id, _ in rows}
+
+    def depth_of(node_id: int) -> int:
+        d = 1
+        cur = parent_of_user.get(node_id)
+        seen: set[int] = {node_id}
+        while cur is not None and cur in user_pks:
+            if cur in seen:
+                # Cycle — shouldn't happen for valid data, but stay
+                # bounded rather than spinning forever.
+                break
+            seen.add(cur)
+            d += 1
+            cur = parent_of_user.get(cur)
+        return d
+
+    by_depth: dict[int, list[int]] = {}
+    for row_id, _ in rows:
+        by_depth.setdefault(depth_of(row_id), []).append(row_id)
+    return by_depth
 
 
 class Command(BaseCommand):
@@ -90,9 +149,14 @@ class Command(BaseCommand):
             )
 
         with transaction.atomic():
-            # Django's queryset.delete() emits DELETE WHERE; not TRUNCATE.
-            # Per Q1: only is_system=False rows go. System accounts stay.
-            deleted_count, _ = Account.objects.filter(is_system=False).delete()
+            # Reverse-depth delete: leaves first, root last. See module
+            # docstring for the on_delete=PROTECT interaction.
+            buckets = _user_account_depth_buckets()
+            deleted_count = 0
+            for depth in sorted(buckets.keys(), reverse=True):
+                ids = buckets[depth]
+                count, _ = Account.objects.filter(id__in=ids).delete()
+                deleted_count += count
 
             AuditLog.record(
                 entity_type="Account",
