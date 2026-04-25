@@ -344,3 +344,51 @@ docker compose -f docker-compose.prod.yml build --no-cache web
 
 **Backup stops running silently.** See `docs/ROLLBACK.md` § 6 — the
 manual query that catches missing `BACKUP_CREATED` audit rows.
+
+---
+
+## Base image pinning policy
+
+The `Dockerfile` pins both build stages to a **specific Debian
+codename** rather than the floating `python:3.12-slim` tag:
+
+```dockerfile
+FROM python:3.12-slim-trixie AS builder
+...
+FROM python:3.12-slim-trixie AS runner
+```
+
+**Why pin.** `python:3.12-slim` on Docker Hub rolls forward to
+whatever Debian stable is at any given moment. That rolled from
+Bookworm to Trixie in Aug 2025 and silently broke
+`make image-build` via an apt-package rename
+(`libgdk-pixbuf2.0-0` → `libgdk-pixbuf-2.0-0`). Pinning to a
+codename makes the next Debian major-version rollover a
+**deliberate** action — a `FROM` change with intentional
+regression testing — not a surprise build failure surfaced on a
+random rebuild.
+
+**When to upgrade.** Two triggers:
+
+1. **Security patches.** Trixie continues to receive
+   `debian-security` updates within `apt-get update`; a base
+   image upgrade is NOT required for routine CVE patches.
+2. **Debian stable rollover** (Trixie → next codename, expected
+   ~2027). Procedure:
+   - Read the new release's [package-renames list](https://www.debian.org/releases/)
+     and the WeasyPrint runtime-deps page for that release.
+   - Update the `FROM` lines to the new codename.
+   - Run `make image-build` locally — the build catches most
+     apt-package availability changes before they hit production.
+   - Boot a container locally; verify the W001 WeasyPrint check
+     comes up clean (`make image-shell` then `python manage.py
+     check --deploy`).
+   - Push; let CI run; then deploy via `./scripts/deploy.sh`
+     during a low-traffic window so any runtime regression
+     surfaces with you watching.
+
+**Standing rule.** When a Dockerfile's base image isn't pinned to
+a specific OS codename, periodic apt-package breakage is the
+failure mode. Pinning makes it deterministic; `make image-build`
+is the local catch. See
+`memory/feedback_base_image_pinning.md`.

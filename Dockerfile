@@ -9,9 +9,19 @@
 #
 # Mirrors the rowe-contest pattern (multi-stage, non-root user,
 # explicit ENTRYPOINT) adapted for Python/Django.
+#
+# Base image is pinned to Debian Trixie by codename, NOT to the
+# floating `python:3.12-slim` tag. Rationale: Docker Hub's slim
+# tag rolls forward to whatever is current Debian stable; that
+# rolled from Bookworm to Trixie in Aug 2025 and silently broke
+# `make image-build` via an apt-package rename (libgdk-pixbuf2.0-0
+# → libgdk-pixbuf-2.0-0). Pinning to a codename makes the next
+# Debian rollover a deliberate FROM change with regression
+# testing, not a surprise rebuild failure. See
+# docs/DEPLOY.md § "Base image pinning policy".
 
 # ---------- builder ----------
-FROM python:3.12-slim AS builder
+FROM python:3.12-slim-trixie AS builder
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -45,7 +55,7 @@ RUN pip install --upgrade pip \
  && pip install .
 
 # ---------- runner ----------
-FROM python:3.12-slim AS runner
+FROM python:3.12-slim-trixie AS runner
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH" \
