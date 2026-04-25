@@ -330,12 +330,36 @@ def test_reverse_opening_balance_unblocks_re_setting_at_same_as_of(owner, cash):
         cash, amount=Decimal("200.00"), as_of=date(2001, 1, 1), user=owner,
     )
     assert second.journal_entry.pk != first.journal_entry.pk
-    # Both share the reference_number; only one is "active."
-    assert (
-        JournalEntry.objects.filter(reference_number="OB:1-0001:2001-01-01")
-        .count()
-        == 2
+
+    # Post-cycle state assertions — these document the actual contract
+    # the duplicate-check filter relies on, not just the row count
+    # (which includes the reversal as a third row sharing the ref).
+    ref = "OB:1-0001:2001-01-01"
+    all_with_ref = JournalEntry.objects.filter(reference_number=ref)
+
+    # 3 JEs share the reference: original, reversal-of-original, re-post.
+    # The reversal copies reference_number from its original (Group D's
+    # reverse_entry, posting.py:169) which is what created the bug
+    # this test fixed in the first place.
+    assert all_with_ref.count() == 3
+
+    # Exactly 1 is "active" — neither reversed nor itself a reversal.
+    # That's the re-post (`second`); it's what the duplicate-check
+    # filter must return on a future invocation.
+    active = all_with_ref.filter(
+        reversed_by__isnull=True,
+        reversing_entry__isnull=True,
     )
+    assert list(active.values_list("pk", flat=True)) == [second.journal_entry.pk]
+
+    # The original is reversed: a reversal points back to it.
+    first.journal_entry.refresh_from_db()
+    assert first.journal_entry.reversed_by.exists()
+
+    # The reversal points at the original via reversing_entry.
+    reversal = JournalEntry.objects.get(reversing_entry=first.journal_entry)
+    assert reversal.reversing_entry_id == first.journal_entry.pk
+    assert reversal.reference_number == ref
 
 
 @pytest.mark.django_db
