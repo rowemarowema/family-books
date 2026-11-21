@@ -30,6 +30,8 @@ services:
     environment:
       DJANGO_SETTINGS_MODULE: family_books.settings.prod
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    volumes:
+      - /root/.config/age/family-books.key:/run/secrets/age.key:ro
     depends_on:
       postgres:
         condition: service_healthy
