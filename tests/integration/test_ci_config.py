@@ -110,12 +110,13 @@ def test_python_version_pinned_to_312(steps):
     assert setup_python["with"]["python-version"] == "3.12"
 
 
-def test_postgres_pinned_to_16(workflow):
-    """Postgres major pinned to 16 to match production (Render).
+def test_postgres_pinned_to_17(workflow):
+    """Postgres major pinned to 17 to match production
+    (docker-compose.prod.yml, since the Dec 2026 cutover).
     Floating tags would let CI drift from prod and produce 'green
     in CI, red in prod' bugs."""
     services = workflow["jobs"]["build"]["services"]
-    assert services["postgres"]["image"] == "postgres:16"
+    assert services["postgres"]["image"] == "postgres:17"
 
 
 # ---------------------------------------------------------------------------
