@@ -178,5 +178,5 @@ def test_gtk_system_libs_apt_installed(steps):
     ]
     assert apt_steps, "GTK apt-install step missing"
     apt_run = apt_steps[0]["run"]
-    for lib in ("libpango-1.0-0", "libpangoft2-1.0-0", "libgdk-pixbuf2.0-0"):
+    for lib in ("libpango-1.0-0", "libpangoft2-1.0-0", "libgdk-pixbuf-2.0-0"):
         assert lib in apt_run, f"Missing GTK lib in apt-install: {lib}"
