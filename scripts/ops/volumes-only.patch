@@ -1,0 +1,13 @@
+diff --git a/docker-compose.prod.yml b/docker-compose.prod.yml
+index 2b85633..9f1e559 100644
+--- a/docker-compose.prod.yml
++++ b/docker-compose.prod.yml
+@@ -30,6 +30,8 @@ services:
+     environment:
+       DJANGO_SETTINGS_MODULE: family_books.settings.prod
+       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
++    volumes:
++      - /root/.config/age/family-books.key:/run/secrets/age.key:ro
+     depends_on:
+       postgres:
+         condition: service_healthy
