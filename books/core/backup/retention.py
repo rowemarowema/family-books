@@ -50,7 +50,9 @@ def select_keepers(
         elif obj.taken_on <= daily_cutoff:
             ym = (obj.taken_on.year, obj.taken_on.month)
             existing = pre_daily_by_ym.get(ym)
-            if existing is None or obj.taken_on > existing.taken_on:
+            # Same-day ties break on the key, whose HHMMSS suffix
+            # (make_object_key) makes the newest backup that day win.
+            if existing is None or (obj.taken_on, obj.key) > (existing.taken_on, existing.key):
                 pre_daily_by_ym[ym] = obj
 
     # Step 2: daily — keep all.
