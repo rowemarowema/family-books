@@ -178,6 +178,51 @@ def test_property_select_for_deletion_complements_keepers(seed):
     assert keepers & deletions == set()
 
 
+# ---------------------------------------------------------------------------
+# Same-day tie-break (Nov 21 2026: the prune kept the FIRST-listed Apr 26
+# backup, 162030, and hid the three later ones)
+# ---------------------------------------------------------------------------
+
+APR_26_KEYS = [
+    "db-2026-04-26-162030.sql.age",
+    "db-2026-04-26-162508.sql.age",
+    "db-2026-04-26-163313.sql.age",
+    "db-2026-04-26-163628.sql.age",
+]
+
+
+def _apr_26_objects(keys: list[str]) -> list[BackupObject]:
+    return [BackupObject(key=k, taken_on=date(2026, 4, 26)) for k in keys]
+
+
+@pytest.mark.parametrize(
+    "order",
+    [
+        APR_26_KEYS,  # B2 listing order (ascending key)
+        list(reversed(APR_26_KEYS)),
+        [APR_26_KEYS[2], APR_26_KEYS[0], APR_26_KEYS[3], APR_26_KEYS[1]],
+        [APR_26_KEYS[3], APR_26_KEYS[1], APR_26_KEYS[2], APR_26_KEYS[0]],
+    ],
+    ids=["listing-order", "reversed", "shuffled-a", "shuffled-b"],
+)
+def test_same_day_monthly_keeps_newest_backup(order):
+    """Apr 26 is outside the daily window on Nov 28, so the April bucket
+    keeps exactly one backup. It must be the newest that day (163628),
+    whatever order the objects are listed in."""
+    today = date(2026, 11, 28)
+    objects = _apr_26_objects(order)
+
+    keepers = select_keepers(objects, today=today)
+    deletions = select_for_deletion(objects, today=today)
+
+    assert keepers == {"db-2026-04-26-163628.sql.age"}
+    assert sorted(deletions) == [
+        "db-2026-04-26-162030.sql.age",
+        "db-2026-04-26-162508.sql.age",
+        "db-2026-04-26-163313.sql.age",
+    ]
+
+
 def test_policy_constants_match_spec():
     """Pin against accidental drift from ADR-001 / Batch #1 #3."""
     assert DAILY_RETENTION_DAYS == 30
