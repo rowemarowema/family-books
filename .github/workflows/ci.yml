@@ -21,12 +21,12 @@ jobs:
     name: build
     runs-on: ubuntu-latest
 
-    # Postgres service container, pinned to 16 to match production
-    # (Render). Health check ensures the job waits until pg_isready
+    # Postgres service container, pinned to 17 to match production
+    # (docker-compose.prod.yml). Health check ensures the job waits until pg_isready
     # before running migrations.
     services:
       postgres:
-        image: postgres:16
+        image: postgres:17
         env:
           POSTGRES_USER: family_books
           POSTGRES_PASSWORD: family_books

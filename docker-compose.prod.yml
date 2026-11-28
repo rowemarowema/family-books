@@ -1,6 +1,8 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    # Postgres 17 (Dec 6 2026 cutover). Digest is the multi-arch index of
+    # postgres:17.12-alpine (= 17-alpine) on Docker Hub, pushed 2026-11-21.
+    image: postgres:17.12-alpine@sha256:f9cf3e1f0066f0eb0c48707d864f0ac5941e9ff454a072077d97a4d278d07d73
     container_name: family-books-postgres
     restart: unless-stopped
     environment:
@@ -8,7 +10,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata17:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -30,8 +32,6 @@ services:
     environment:
       DJANGO_SETTINGS_MODULE: family_books.settings.prod
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-    volumes:
-      - /root/.config/age/family-books.key:/run/secrets/age.key:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -57,7 +57,10 @@ services:
       - internal
 
 volumes:
+  # pgdata holds the Postgres 16 cluster. No service uses it after the 17
+  # cutover; it stays as the rollback copy. Never remove it with `down -v`.
   pgdata:
+  pgdata17:
   certbot-webroot:
 
 networks:
